@@ -1,6 +1,6 @@
 # ADR 0002: Command Lifecycle and Timeout Semantics
 
-- Status: Accepted; implementation live-validation pending
+- Status: Accepted; shared command path live-validated
 - Date: 2026-09-08
 
 ## Context
@@ -37,6 +37,10 @@ Reconciliation is exposed through a registered handler that does not require Ble
 so status remains available while a long operation is running. Caller-visible queue waits are
 bounded to 0.1 through 7200 seconds.
 
+The server starts the lifecycle on Blender's main thread before accepting clients. The stable timer
+callback polls at most every 50 ms while idle; network threads may observe that registration but may
+not call Blender's timer or handler APIs. Shutdown uses the same stable callback identity.
+
 ## Acceptance Criteria
 
 - The dequeue and pending-to-running transition share synchronization with cancellation.
@@ -46,5 +50,7 @@ bounded to 0.1 through 7200 seconds.
 - Batch execution applies the same semantics to every child command.
 
 Deterministic unit tests cover pending timeout, running timeout and late completion, cancellation,
-duplicate replay, request-ID conflict, ledger saturation, timer failure, and shutdown tombstoning.
-Live Blender and socket-fault acceptance remains required before these controls are marked enforced.
+duplicate replay, request-ID conflict, ledger saturation, timer failure, worker-thread rejection,
+and shutdown tombstoning. Blender 5.2.1 tests cover the same queue path over authenticated sockets,
+including response loss/reconnect and actual timer removal. Direct provider callbacks and durable
+restart recovery are outside this ADR's implemented boundary.

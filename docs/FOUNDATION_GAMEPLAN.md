@@ -63,10 +63,11 @@ The command lifecycle slice changes these boundaries:
 - `blender_mcp/core/headless_mode.py`: headless render execution uses the shared queue instead of a
   second busy-waiting timer path.
 
-This slice is unit-verified but still requires live Blender queue congestion, reconnect,
-shutdown/reload, and socket-fault validation. Its ledger is process-local and bounded; an evicted or
-restart-lost ID is unknown, never proof that retry is safe. Direct provider timer callbacks remain
-outside this lifecycle and require separate job identity.
+This slice is unit-verified and live-validated on Blender 5.2.1 for queue congestion, pending and
+running timeouts, reconnect after response loss, duplicate/conflicting IDs, cancellation,
+main-thread execution, and shutdown timer cleanup. Its ledger is process-local and bounded; an
+evicted or restart-lost ID is unknown, never proof that retry is safe. Direct provider timer
+callbacks remain outside this lifecycle and require separate job identity.
 
 ### Milestone 0: Baseline and scan readiness
 

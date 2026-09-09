@@ -23,6 +23,11 @@ and the timer drains either tombstone without invoking its callable. If the call
 claimed, timeout becomes `running_after_timeout`; late success or failure is retained as
 `completed_late` or `failed_late`.
 
+The server installs one stable timer callback from Blender's main thread before it accepts client
+work. Worker-side cold startup and worker-side timer shutdown fail closed without calling `bpy`.
+The idle callback interval is 50 ms, below the minimum 100 ms dispatcher timeout, and add-on
+teardown unregisters the exact callback object that Blender registered.
+
 `manage_command_lifecycle` runs outside the Blender timer. `GET_STATUS` can therefore reconcile a
 retained request while Blender's main thread is occupied, and `CANCEL` tombstones only work that is
 still pending. It never reports running work as cancelled.
@@ -67,7 +72,8 @@ ID and canonical request content.
 - The claim covers the registered dispatcher-to-`ThreadSafety` queue and the headless render path,
   which now uses that queue. Direct `bpy.app.timers` callbacks in provider handlers remain separate
   asynchronous operations and need their own job identity before they are covered by `REC-001`.
-- Live Blender race, reconnect, shutdown/reload, and commit-before-response tests remain required.
+- Blender 5.2.1 passes live race, reconnect, response-loss, cancellation, main-thread, and shutdown
+  tests through `tests/live/run_lifecycle_validation.ps1`.
 
 ## Foundation 0D Acceptance Evidence
 
@@ -76,9 +82,9 @@ ID and canonical request content.
   implemented, unit tested.
 - Pending timeout and cancellation tombstone before the queue consumer can execute: implemented,
   deterministic negative tests pass.
-- Running timeout remains queryable and never claims non-execution: implemented, deterministic late
-  completion test passes; reconnect validation remains live-only.
-- Mutations serialize and terminal states are immutable: implemented on the shared timer queue;
-  live Blender scheduling validation remains.
-- Response loss can be reconciled by request ID before retry: endpoint implemented; live socket
-  fault injection remains.
+- Running timeout remains queryable and never claims non-execution: deterministic and live late
+  completion/reconnect tests pass.
+- Mutations serialize and terminal states are immutable: deterministic and live Blender scheduling
+  tests pass on the shared timer queue.
+- Response loss can be reconciled by request ID before retry: live socket fault injection and
+  identical-ID replay pass without a second mutation.

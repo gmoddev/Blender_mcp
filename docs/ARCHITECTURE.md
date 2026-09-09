@@ -24,6 +24,11 @@ The add-on listener and client threads own sockets, frame parsing, authenticatio
 and command handoff. They must not perform Blender API work. The dispatcher validates and schedules;
 handlers that touch `bpy` execute through the Blender main-thread timer queue.
 
+`BlenderMCPServer.start()` initializes the shared lifecycle before opening the listener. Timer and
+dependency-handler registration occur only on Blender's main thread, the background health monitor
+reads timestamps without calling `bpy`, and teardown unregisters the same stable callback object.
+Cold worker attempts fail closed instead of registering Blender callbacks from a socket thread.
+
 ## Trust Boundaries
 
 1. The MCP client controls JSON-RPC names, arguments, and IDs.
@@ -75,6 +80,8 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - A bridge timeout is visibly indeterminate and never automatically replayed. Foundation 0D adds a
   bounded, in-process request ledger and a reconciliation handler that bypasses the Blender timer.
   It does not survive Blender restart and does not cover direct provider timer callbacks.
+- The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
+  shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
 - Provider credentials remain Scene properties and existing file/network handlers remain outside a
   central authority boundary. These prevent valuable-asset readiness.
 
