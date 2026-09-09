@@ -25,7 +25,7 @@ In practice: tell your AI *"create a red metallic sphere above the cube"* or *"c
 
 > **Raw Python is a separate high-risk capability.** `execute_blender_code`, text-block execution, and the legacy alias run unrestricted Python with the Blender user's authority. They are denied in Safe Mode and remain denied in Full Structured Mode until **Allow Raw Python** is explicitly enabled.
 
-> **Asset safety status.** Foundation 0 is not complete. Use disposable `.blend` copies: filesystem roots, external integrations, provider-secret migration, mutation reconciliation, and live Blender validation remain open.
+> **Asset safety status.** Foundation 0 is not complete. The scene/export family now uses explicit local read/write roots, but remaining file surfaces, external integrations, provider-secret migration, atomic publication, and live cross-platform validation remain open. Continue using disposable `.blend` copies.
 
 ---
 

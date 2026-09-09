@@ -196,9 +196,12 @@ class BlenderMCPServer:
 
         try:
             from .core.session import ValidateAuthToken
+            from .core.filesystem_boundary import ConfigureFilesystemPolicy
             from .core.thread_safety import ThreadSafety
 
             self.AuthToken = ValidateAuthToken(self.GetAuthToken())
+            ReadRoot, WriteRoot, AllowOverwrite = self.GetFilesystemPreferences()
+            ConfigureFilesystemPolicy(ReadRoot, WriteRoot, AllowOverwrite)
             if not self.IsLoopbackHost(self.host):
                 raise ValueError("Remote binding is disabled; use a loopback host")
             if not getattr(bpy, "is_mock", False) and not ThreadSafety().Start():
@@ -247,6 +250,24 @@ class BlenderMCPServer:
         if EnvironmentToken:
             return EnvironmentToken
         return ""
+
+    @staticmethod
+    def GetFilesystemPreferences():
+        """Read local filesystem authority before listener threads start."""
+        try:
+            Addon: Any = bpy.context.preferences.addons.get(__package__)
+            if Addon:
+                Preferences = Addon.preferences
+                ReadValue = getattr(Preferences, "filesystem_read_root", "")
+                WriteValue = getattr(Preferences, "filesystem_write_root", "")
+                OverwriteValue = getattr(Preferences, "allow_filesystem_overwrite", False)
+                ReadRoot = ReadValue.strip() if isinstance(ReadValue, str) else ""
+                WriteRoot = WriteValue.strip() if isinstance(WriteValue, str) else ""
+                AllowOverwrite = OverwriteValue if isinstance(OverwriteValue, bool) else False
+                return ReadRoot, WriteRoot, AllowOverwrite
+        except (AttributeError, KeyError, TypeError):
+            pass
+        return "", "", False
 
     @staticmethod
     def IsLoopbackHost(Host):
@@ -561,6 +582,35 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         ),
     )
 
+    filesystem_read_root: str = cast(
+        str,
+        StringProperty(
+            name="Filesystem Read Root",
+            description="Existing local directory structured MCP tools may read after restart",
+            default="",
+            subtype="DIR_PATH",
+        ),
+    )
+
+    filesystem_write_root: str = cast(
+        str,
+        StringProperty(
+            name="Filesystem Write Root",
+            description="Existing local directory structured MCP tools may write after restart",
+            default="",
+            subtype="DIR_PATH",
+        ),
+    )
+
+    allow_filesystem_overwrite: bool = cast(
+        bool,
+        BoolProperty(
+            name="Allow MCP File Overwrite",
+            description="Allow structured MCP tools to replace files inside the write root",
+            default=False,
+        ),
+    )
+
     def draw(self, context):
         layout = self.layout
 
@@ -571,6 +621,11 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         box.operator("blendermcp.rotate_auth_token", icon="FILE_REFRESH")
         box.prop(self, "safe_mode", text="Safe Mode (Disable Python Execution)")
         box.prop(self, "raw_code_enabled", text="Allow Raw Python (High Risk)")
+        box.separator()
+        box.prop(self, "filesystem_read_root", text="Filesystem Read Root")
+        box.prop(self, "filesystem_write_root", text="Filesystem Write Root")
+        box.prop(self, "allow_filesystem_overwrite", text="Allow File Overwrite (High Risk)")
+        box.label(text="Filesystem policy changes apply after server restart.", icon="INFO")
         if self.safe_mode:
             box.label(text="Read-only audited actions are allowed.", icon="CHECKMARK")
         else:

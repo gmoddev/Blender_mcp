@@ -14,6 +14,7 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
+from ..core.security import Capability
 from ..core.logging_config import get_logger
 from ..core.validation_utils import ValidationUtils
 from ..utils.error_handler import mcp_tool_handler
@@ -157,6 +158,10 @@ def SafeExportStrategy(use_selection=False, apply_modifiers=True):  # type: igno
 @register_handler(
     "manage_export",
     actions=[a.value for a in ExportAction],
+    capabilities={
+        Action.value: [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+        for Action in ExportAction
+    },
     category="general",
     priority=25,
     schema={
@@ -187,8 +192,8 @@ def SafeExportStrategy(use_selection=False, apply_modifiers=True):  # type: igno
                 "properties": {
                     "format": {
                         "type": "string",
-                        "enum": ["GLB", "GLTF_SEPARATE", "GLTF_EMBEDDED"],
-                        "description": "GLTF export format",
+                        "enum": ["GLB"],
+                        "description": "Single-file GLB export format",
                     },
                     "use_draco": {
                         "type": "boolean",
@@ -233,9 +238,27 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
     """
     Advanced Export Handling with Staff+ Safe Mode.
     """
+    extra_params = params.get("params", {})
+    if action == ExportAction.EXPORT_GLTF.value and extra_params.get("format", "GLB") != "GLB":
+        return ResponseBuilder.error(
+            handler="manage_export",
+            action=action,
+            error_code="MULTI_FILE_EXPORT_DISABLED",
+            message="Only single-file GLB export is enabled until sidecars are authorized",
+        )
+
+    ExtensionsByAction = {
+        ExportAction.EXPORT_GLTF.value: {".glb"},
+        ExportAction.EXPORT_FBX.value: {".fbx"},
+        ExportAction.EXPORT_OBJ.value: {".obj"},
+    }
+
     # Sanitize Path with strict Validator
     try:
-        filepath = PathValidator.validate_and_prepare(params.get("filepath"))
+        filepath = PathValidator.validate_and_prepare(
+            params.get("filepath"),
+            ExtensionsByAction.get(action, set()),
+        )
     except Exception as e:
         return ResponseBuilder.error(
             handler="manage_export",
@@ -247,7 +270,6 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
     # Staff+ Default: Safe Mode IS ON by default for complex scenes
     safe_mode = params.get("safe_mode", True)
     use_selection = params.get("use_selection", False)
-    extra_params = params.get("params", {})
 
     # Verify Permissions (Staff+ Hardening)
     dir_name = os.path.dirname(filepath)
@@ -269,7 +291,7 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
         def run_export():  # type: ignore[no-untyped-def]
             with ContextManagerV3.temp_override(area_type="VIEW_3D"):
                 if action == ExportAction.EXPORT_GLTF.value:
-                    export_format = extra_params.get("format", "GLB")
+                    export_format = "GLB"
 
                     # Normalize Draco parameter names (accept both use_draco and draco_compression)
                     use_draco = extra_params.get("use_draco") or extra_params.get(
@@ -358,7 +380,12 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
             # 1.0.0 Fix: Wrap in temp_override for context safety
             with ContextManagerV3.temp_override(area_type="VIEW_3D"):
                 if action == ExportAction.EXPORT_GLTF.value:
-                    safe_ops.export_scene.gltf(filepath=filepath, use_selection=use_selection)
+                    safe_ops.export_scene.gltf(
+                        filepath=filepath,
+                        use_selection=use_selection,
+                        export_format="GLB",
+                        export_image_format="AUTO",
+                    )
                 elif action == ExportAction.EXPORT_FBX.value:
                     safe_ops.export_scene.fbx(filepath=filepath, use_selection=use_selection)
                 elif action == ExportAction.EXPORT_OBJ.value:

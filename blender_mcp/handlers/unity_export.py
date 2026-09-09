@@ -11,7 +11,6 @@ Export and validation tools for Unity workflow:
 Part of 'unity_handler' modularization.
 """
 
-import os
 from typing import Any
 
 try:
@@ -26,21 +25,12 @@ from ..core.thread_safety import execute_on_main_thread, ensure_main_thread, thr
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.smart_mode_manager import SmartModeManager
 from ..dispatcher import register_handler
 from ..utils.path import get_safe_path
 
 logger = get_logger()
-
-
-def is_relative_path(filepath: str) -> bool:
-    """Check if path is relative"""
-    return not os.path.isabs(filepath)
-
-
-def get_shared_root() -> str:
-    """Get shared root directory"""
-    return os.environ.get("MCP_SHARED_ROOT", "C:/Tools/my_mcp/shared")
 
 
 @register_handler(
@@ -132,6 +122,12 @@ def prepare_for_unity(**params: Any) -> dict[str, Any]:
 
 @register_handler(
     "export_unity_fbx",
+    capabilities={
+        "export_unity_fbx": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ]
+    },
     schema={
         "type": "object",
         "title": "Export Unity FBX",
@@ -173,21 +169,14 @@ def export_unity_fbx(**params: Any) -> dict[str, Any]:
             "error": "filepath parameter is required. Please specify where to save the FBX file."
         }
 
-    # Check if relative path
-    if is_relative_path(filepath):
-        base_path = get_shared_root()
-        filepath = os.path.join(base_path, filepath)
-
-    # Sanitize Path
-    filepath = get_safe_path(filepath)
-    filepath = os.path.normpath(filepath)
-    directory = os.path.dirname(filepath)
-
-    # Ensure directory exists
     try:
-        os.makedirs(directory, exist_ok=True)
+        filepath = get_safe_path(
+            filepath,
+            AllowedExtensions={".fbx"},
+            CreateParents=True,
+        )
     except Exception as e:
-        return {"error": f"Cannot create directory {directory}: {str(e)}"}
+        return {"error": str(e)}
 
     def export_operation() -> dict[str, Any]:
         original_selection = list(bpy.context.selected_objects)
@@ -315,6 +304,12 @@ def _list_all_collection_names() -> list[str]:
 
 @register_handler(
     "export_unity_collection",
+    capabilities={
+        "export_unity_collection": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ]
+    },
     schema={
         "type": "object",
         "title": "Export Unity Collection",
@@ -359,8 +354,16 @@ def export_unity_collection(**params: Any) -> dict[str, Any]:
         }
 
     if not filepath:
-        base_path = get_shared_root()
-        filepath = os.path.join(base_path, "models", f"{collection_name}.fbx")
+        filepath = f"models/{collection_name}.fbx"
+
+    try:
+        filepath = get_safe_path(
+            filepath,
+            AllowedExtensions={".fbx"},
+            CreateParents=True,
+        )
+    except Exception as e:
+        return {"error": str(e)}
 
     def export_operation() -> dict[str, Any]:
         original_selection = list(bpy.context.selected_objects)
@@ -401,8 +404,6 @@ def export_unity_collection(**params: Any) -> dict[str, Any]:
             selected = list(bpy.context.selected_objects)
             if not selected:
                 return {"error": f"No exportable objects in collection: {collection_name}"}
-
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
             # Bug 10 Fix: Enforce active object in view layer physically
             if selected:
@@ -512,6 +513,12 @@ def validate_for_unity(**params: Any) -> dict[str, Any]:
 
 @register_handler(
     "export_lod_chain",
+    capabilities={
+        "export_lod_chain": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ]
+    },
     schema={
         "type": "object",
         "title": "Export LOD Chain",
@@ -544,16 +551,21 @@ def export_lod_chain(**params: Any) -> dict[str, Any]:
         return {"error": "base_name is required"}
 
     results = {}
-    shared_root = get_shared_root()
-
     for lod_level, obj_name in lod_objects.items():
         obj = bpy.data.objects.get(obj_name)
         if not obj:
             results[lod_level] = {"error": f"Object not found: {obj_name}"}
             continue
 
-        filepath = f"{shared_root}/models/{base_name}_{lod_level}.fbx"
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        try:
+            filepath = get_safe_path(
+                f"models/{base_name}_{lod_level}.fbx",
+                AllowedExtensions={".fbx"},
+                CreateParents=True,
+            )
+        except Exception as e:
+            results[lod_level] = {"error": str(e)}
+            continue
 
         def export_single_lod(_obj: Any = obj, _filepath: str = filepath) -> dict[str, Any]:
             ContextManagerV3.deselect_all_objects()

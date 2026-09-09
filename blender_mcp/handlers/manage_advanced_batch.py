@@ -11,6 +11,7 @@ High Mode Philosophy: Maximum power, maximum safety.
 """
 
 from typing import List, Dict, Any
+import os
 from ..core.execution_engine import safe_ops
 import re
 
@@ -30,14 +31,26 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
+from ..utils.path import get_safe_path
 
 logger = get_logger()
+
+
+AdvancedBatchCapabilities = {
+    Action.value: [Capability.MUTATE.value] for Action in AdvancedBatchAction
+}
+AdvancedBatchCapabilities[AdvancedBatchAction.EXPORT_BATCH_VARIANTS.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
 
 
 @register_handler(
     "manage_advanced_batch",
     actions=[a.value for a in AdvancedBatchAction],
+    capabilities=AdvancedBatchCapabilities,
     category="general",
     schema={
         "type": "object",
@@ -51,6 +64,14 @@ logger = get_logger()
             "pipeline": {"type": "object", "description": "Pipeline definition"},
             "conditions": {"type": "array"},
             "operations": {"type": "array"},
+            "base_path": {
+                "type": "string",
+                "description": "Output directory relative to the configured filesystem write root",
+            },
+            "formats": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["GLTF", "FBX", "OBJ"]},
+            },
         },
         "required": ["action"],
     },
@@ -522,16 +543,47 @@ def _bake_all_dynamics(params):  # type: ignore[no-untyped-def]
 def _export_batch_variants(params):  # type: ignore[no-untyped-def]
     """Export multiple format variants."""
     objects = params.get("objects", [])
-    base_path = params.get("base_path", "//exports/")
+    base_path = params.get("base_path", "exports")
     formats = params.get("formats", ["GLTF", "FBX", "OBJ"])
 
     exports = []
+    ExtensionByFormat = {"GLTF": ".glb", "FBX": ".fbx", "OBJ": ".obj"}
+    UnsupportedFormats = [Format for Format in formats if Format not in ExtensionByFormat]
+    if UnsupportedFormats:
+        return ResponseBuilder.error(
+            handler="manage_advanced_batch",
+            action="EXPORT_BATCH_VARIANTS",
+            error_code="INVALID_PARAMETER_VALUE",
+            message="One or more export formats are unsupported",
+        )
+
+    ExportPlans = []
 
     for obj_name in objects:
         obj = bpy.data.objects.get(obj_name)
         if not obj:
             continue
 
+        ObjectPaths = []
+        try:
+            for fmt in formats:
+                ext = ExtensionByFormat[fmt]
+                FilePath = get_safe_path(
+                    os.path.join(base_path, f"{obj_name}{ext}"),
+                    AllowedExtensions={ext},
+                    CreateParents=True,
+                )
+                ObjectPaths.append((fmt, FilePath))
+        except Exception as Error:
+            return ResponseBuilder.error(
+                handler="manage_advanced_batch",
+                action="EXPORT_BATCH_VARIANTS",
+                error_code="INVALID_PATH",
+                message=str(Error),
+            )
+        ExportPlans.append((obj_name, obj, ObjectPaths))
+
+    for obj_name, obj, ObjectPaths in ExportPlans:
         # Select only this object
         with ContextManagerV3.temp_override(
             area_type="VIEW_3D", active_object=obj, selected_objects=[obj]
@@ -542,12 +594,14 @@ def _export_batch_variants(params):  # type: ignore[no-untyped-def]
 
             obj_exports = {"object": obj_name, "files": []}
 
-            for fmt in formats:
-                ext = {"GLTF": ".glb", "FBX": ".fbx", "OBJ": ".obj"}.get(fmt, ".ext")
-                filepath = f"{base_path}{obj_name}{ext}"
-
+            for fmt, filepath in ObjectPaths:
                 if fmt == "GLTF":
-                    safe_ops.export_scene.gltf(filepath=filepath, use_selection=True)
+                    safe_ops.export_scene.gltf(
+                        filepath=filepath,
+                        use_selection=True,
+                        export_format="GLB",
+                        export_image_format="AUTO",
+                    )
                 elif fmt == "FBX":
                     safe_ops.export_scene.fbx(filepath=filepath, use_selection=True)
                 elif fmt == "OBJ":

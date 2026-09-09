@@ -53,6 +53,8 @@ not considered sandboxed.
 - Indeterminate mutations can be queried and reconciled before retry.
 - Boundary errors remain structured and must not open modal or focus-stealing
   UI.
+- File reads and writes require a canonical path beneath the matching explicit,
+  user-approved root; overwrite is a separate local decision.
 
 The engineering verification registry is maintained in
 `docs/SECURITY_INVARIANTS.md`.
@@ -91,10 +93,15 @@ Blender validation. The action-level capability audit is incomplete.
 The shared dispatcher queue now has timeout/cancellation tombstones, duplicate
 detection, bounded in-process reconciliation, and truthful running-after-timeout
 states. These controls still require live Blender and reconnect/fault validation,
-and direct provider timer callbacks remain outside the ledger. Other known,
-unremediated gaps remain in filesystem authorization, external integration isolation, provider credential
-storage, download/archive limits, selector complexity, checkpoint recovery, and
-the remaining logging surface. These are scan targets, not accepted risks.
+and direct provider timer callbacks remain outside the ledger. The scene/export
+family now has a partial filesystem authority boundary. Multi-file glTF, USD
+texture sidecars, and external asset packing are disabled pending complete
+input/output-family grants; rendering, captures, sequencer/import/provider paths,
+other sidecars, atomic publication, and live
+cross-platform validation remain open. Other known gaps remain in external
+integration isolation, provider credential storage, download/archive limits,
+selector complexity, checkpoint recovery, and the remaining logging surface.
+These are scan targets, not accepted risks.
 
 Until Foundation 0 is complete and live-validated, agent-driven mutations
 should run only against disposable copies of valuable `.blend` files. Loopback

@@ -26,17 +26,47 @@ from ..core.parameter_validator import validated_handler
 from ..core.enums import CloudRenderAction
 from ..core.thread_safety import ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
+from ..utils.path import get_safe_path
 from typing import Any
 
 logger = get_logger()
 
 
+CloudRenderCapabilities = {
+    Action.value: [Capability.MUTATE.value] for Action in CloudRenderAction
+}
+CloudRenderCapabilities[CloudRenderAction.VALIDATE_SCENE.value] = [
+    Capability.READ.value,
+    Capability.FILESYSTEM_READ.value,
+]
+for CloudWriteAction in (
+    CloudRenderAction.PACKAGE_ASSETS.value,
+    CloudRenderAction.OPTIMIZE_FOR_FARM.value,
+):
+    CloudRenderCapabilities[CloudWriteAction] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+
+
+def _FilesystemError(Action: str, Error: FilesystemPolicyError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_cloud_render",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
+
+
 @register_handler(
     "manage_cloud_render",
     actions=[a.value for a in CloudRenderAction],
+    capabilities=CloudRenderCapabilities,
     category="general",
     schema={
         "type": "object",
@@ -46,7 +76,11 @@ logger = get_logger()
             "action": ValidationUtils.generate_enum_schema(
                 CloudRenderAction,
                 "Distributed render action - ALL FREE",
-            )
+            ),
+            "output_dir": {
+                "type": "string",
+                "description": "Package directory relative to the filesystem write root",
+            },
         },
         "required": ["action"],
     },
@@ -139,40 +173,11 @@ def _sheepit_action(sub_action, params):  # type: ignore[no-untyped-def]
         )
 
     elif sub_action == "UPLOAD":
-        scene = bpy.context.scene
-
-        if not bpy.data.filepath:
-            return ResponseBuilder.error(
-                handler="manage_cloud_render",
-                action="SHEEPIT_UPLOAD",
-                error_code="VALIDATION_ERROR",
-                message="Save your scene first before uploading to SheepIt",
-            )
-
-        # Pack all resources
-        try:
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                safe_ops.file.pack_all()
-                safe_ops.wm.save_as_mainfile(filepath=bpy.data.filepath)
-        except:
-            pass
-
-        file_size = os.path.getsize(bpy.data.filepath) / (1024 * 1024)  # MB
-
-        return ResponseBuilder.success(
+        return ResponseBuilder.error(
             handler="manage_cloud_render",
             action="SHEEPIT_UPLOAD",
-            data={
-                "service": "SheepIt (FREE)",
-                "filepath": bpy.data.filepath,
-                "file_size_mb": round(file_size, 2),
-                "note": "File ready for FREE SheepIt upload. Download Java client from sheepit-renderfarm.com",
-                "requirements": [
-                    "SheepIt Java Client (free download)",
-                    "Account on sheepit-renderfarm.com (free)",
-                    "Earn credits by rendering others' projects",
-                ],
-            },
+            error_code="ASSET_PACKING_DISABLED",
+            message="Asset packing is disabled until every external asset has explicit read authority",
         )
 
     elif sub_action == "SUBMIT":
@@ -508,7 +513,16 @@ def _validate_scene(params):  # type: ignore[no-untyped-def]
 
     # Check file size
     if bpy.data.filepath:
-        size_mb = os.path.getsize(bpy.data.filepath) / (1024 * 1024)
+        try:
+            SafePath = get_safe_path(
+                bpy.data.filepath,
+                Access=FilesystemAccess.READ,
+                AllowedExtensions={".blend"},
+                CreateParents=False,
+            )
+        except FilesystemPolicyError as Error:
+            return _FilesystemError("VALIDATE_SCENE", Error)
+        size_mb = os.path.getsize(SafePath) / (1024 * 1024)
         if size_mb > 500:
             warnings.append(f"Large file ({size_mb:.1f} MB) - may take longer to upload")
 
@@ -531,44 +545,12 @@ def _validate_scene(params):  # type: ignore[no-untyped-def]
 
 def _package_assets(params):  # type: ignore[no-untyped-def]
     """Package scene and assets for upload."""
-
-    if not bpy.data.filepath:
-        return ResponseBuilder.error(
-            handler="manage_cloud_render",
-            action="PACKAGE_ASSETS",
-            error_code="VALIDATION_ERROR",
-            message="Save scene first",
-        )
-
-    output_dir = params.get("output_dir", "//render_package/")
-    output_path = bpy.path.abspath(output_dir)
-    os.makedirs(output_path, exist_ok=True)
-
-    # Pack all resources
-    try:
-        with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-            safe_ops.file.pack_all()
-    except:
-        pass
-
-    # Save packed file
-    base_name = os.path.basename(bpy.data.filepath)
-    packed_path = os.path.join(output_path, base_name)
-    with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-        safe_ops.wm.save_as_mainfile(filepath=packed_path)
-
-    file_size = os.path.getsize(packed_path) / (1024 * 1024)
-
-    return ResponseBuilder.success(
+    del params
+    return ResponseBuilder.error(
         handler="manage_cloud_render",
         action="PACKAGE_ASSETS",
-        data={
-            "package_dir": output_path,
-            "file": packed_path,
-            "size_mb": round(file_size, 2),
-            "note": "Scene packaged for FREE distributed rendering",
-            "ready_for": ["SheepIt", "Flamenco", "Local Network", "Tile Render"],
-        },
+        error_code="ASSET_PACKING_DISABLED",
+        message="Asset packaging is disabled until every external asset has explicit read authority",
     )
 
 
@@ -614,16 +596,18 @@ def _calculate_render_time(params):  # type: ignore[no-untyped-def]
 def _optimize_for_farm(params):  # type: ignore[no-untyped-def]
     """Optimize scene for farm rendering (FREE optimizations)."""
     scene = bpy.context.scene
+    try:
+        SafePath = get_safe_path(
+            bpy.data.filepath,
+            AllowedExtensions={".blend"},
+            CreateParents=False,
+        )
+    except FilesystemPolicyError as Error:
+        return _FilesystemError("OPTIMIZE_FOR_FARM", Error)
 
     optimizations = []
 
-    # Pack resources
-    try:
-        with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-            safe_ops.file.pack_all()
-        optimizations.append("Packed all external resources")
-    except:
-        pass
+    warnings = ["External asset packing skipped because asset read grants are not implemented"]
 
     # Simplify if needed
     if params.get("aggressive", False):
@@ -644,13 +628,14 @@ def _optimize_for_farm(params):  # type: ignore[no-untyped-def]
         optimizations.append(f"Found {large_textures} textures >4K - consider resizing")
 
     with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-        safe_ops.wm.save_as_mainfile(filepath=bpy.data.filepath)
+        safe_ops.wm.save_as_mainfile(filepath=SafePath)
 
     return ResponseBuilder.success(
         handler="manage_cloud_render",
         action="OPTIMIZE_FOR_FARM",
         data={
             "optimizations_applied": optimizations,
+            "warnings": warnings,
             "note": "Scene optimized for FREE distributed rendering",
         },
     )
@@ -667,7 +652,13 @@ def _check_missing_assets():  # type: ignore[no-untyped-def]
 
     for img in bpy.data.images:
         if img.source == "FILE" and img.filepath:
-            if not os.path.exists(bpy.path.abspath(img.filepath)):
+            try:
+                get_safe_path(
+                    bpy.path.abspath(img.filepath),
+                    Access=FilesystemAccess.READ,
+                    CreateParents=False,
+                )
+            except Exception:
                 if not img.packed_file:
                     missing.append(f"Image: {img.name}")
 

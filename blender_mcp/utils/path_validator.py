@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 import os
-from pathlib import Path
+from typing import Iterable
+
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
+from .path import get_safe_path
 
 
 class PathValidator:
@@ -10,7 +15,11 @@ class PathValidator:
     """
 
     @staticmethod
-    def validate_and_prepare(filepath: str, allowed_extensions: set[str] = None) -> str:
+    def validate_and_prepare(
+        filepath: str,
+        allowed_extensions: Iterable[str] | None = None,
+        overwrite: bool = True,
+    ) -> str:
         """
         Takes a raw filepath, normalizes it, checks permissions and extension.
         Creates parent directories if missing.
@@ -25,25 +34,15 @@ class PathValidator:
         Raises:
             ValueError: If path is invalid or extension is wrong.
         """
-        if not filepath or not str(filepath).strip():
-            raise ValueError(f"Filepath cannot be empty: '{filepath}'")
-
-        # Normalize slashed to current OS
-        raw_path = Path(str(filepath).strip()).resolve()
-
-        if allowed_extensions:
-            ext = raw_path.suffix.lower()
-            if ext not in allowed_extensions:
-                raise ValueError(
-                    f"Invalid file extension: '{ext}'. Must be one of {allowed_extensions}"
-                )
-
-        # Create parent directories dynamically (Defends against FileNotFoundError)
-        parent_dir = raw_path.parent
-        if not parent_dir.exists():
-            try:
-                parent_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                raise PermissionError(f"Failed to create directory {parent_dir}: {e}")
-
-        return str(raw_path)
+        SafePath = get_safe_path(
+            filepath,
+            Access=FilesystemAccess.WRITE,
+            AllowedExtensions=allowed_extensions,
+            CreateParents=True,
+        )
+        if os.path.exists(SafePath) and not overwrite:
+            raise FilesystemPolicyError(
+                "FILESYSTEM_OVERWRITE_NOT_REQUESTED",
+                "The target exists and this request did not opt in to replacement",
+            )
+        return SafePath

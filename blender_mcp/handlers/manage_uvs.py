@@ -26,8 +26,10 @@ from ..core.logging_config import get_logger
 from ..core.universal_coercion import TypeCoercer, ParameterNormalizer
 from ..core.smart_mode_manager import SmartModeManager
 from ..core.enhanced_recovery import EnhancedRecovery, RetryPolicy
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
 from ..dispatcher import register_handler
+from ..utils.path import get_safe_path
 
 from ..core.parameter_validator import validated_handler
 from ..core.enums import UVsAction
@@ -36,9 +38,17 @@ from typing import Any
 logger = get_logger()
 
 
+UVCapabilities = {Action.value: [Capability.MUTATE.value] for Action in UVsAction}
+UVCapabilities[UVsAction.EXPORT_LAYOUT.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
+
+
 @register_handler(
     "manage_uvs",
     actions=[a.value for a in UVsAction],
+    capabilities=UVCapabilities,
     category="uv",
     priority=35,
     schema={
@@ -428,6 +438,20 @@ def _handle_export_layout(obj, params):  # type: ignore[no-untyped-def]
 
     resolution = params.get("resolution", 1024)
 
+    try:
+        filepath = get_safe_path(
+            filepath,
+            AllowedExtensions={".png"},
+            CreateParents=True,
+        )
+    except Exception as Error:
+        return ResponseBuilder.error(
+            handler="manage_uvs",
+            action="EXPORT_LAYOUT",
+            error_code="INVALID_PATH",
+            message=str(Error),
+        )
+
     def export_operation():  # type: ignore[no-untyped-def]
         # Ensure we're in object mode for export
         with SmartModeManager().mode_context(obj, "OBJECT"):
@@ -453,7 +477,7 @@ def _handle_export_layout(obj, params):  # type: ignore[no-untyped-def]
 
     if result.success:
         return ResponseBuilder.success(
-            handler="manage_uvs", action="SPHERE_PROJECT", data=result.result
+            handler="manage_uvs", action="EXPORT_LAYOUT", data=result.result
         )
     else:
         return result.error

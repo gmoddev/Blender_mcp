@@ -14,7 +14,8 @@ evidence that an action is read-only.
 Attach capability requirements to each registered action. Unknown or absent metadata denies.
 Safe Mode allows only explicit `READ`; Full Structured Mode adds `MUTATE`; Raw Code Mode separately
 adds `EXECUTE_CODE` only when Safe Mode is off. Dedicated filesystem, network, process, and
-credential capabilities remain denied until their policy foundations exist.
+credential capabilities remain denied unless a later dedicated policy explicitly grants them.
+ADR 0006 defines the first conditional filesystem grants.
 
 During migration, every unaudited legacy action is conservatively classified `MUTATE`, so Safe Mode
 blocks it. Core discovery/status/validation and every raw execution route have explicit initial

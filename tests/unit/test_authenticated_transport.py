@@ -16,6 +16,7 @@ sys.modules.setdefault("mathutils.bvhtree", MagicMock())
 sys.modules.setdefault("bmesh", MagicMock())
 
 from blender_mcp import BlenderMCPServer  # noqa: E402
+from blender_mcp.core.filesystem_boundary import ResetFilesystemPolicy  # noqa: E402
 from blender_mcp.core.protocol import recv_message, send_message  # noqa: E402
 from blender_mcp.core.session import BuildEnvelope, MessageType  # noqa: E402
 from stdio_bridge import MCPBridge  # noqa: E402
@@ -123,6 +124,36 @@ def test_preference_rotation_wins_over_stale_environment_after_restart() -> None
     ):
         RestartedServer = BlenderMCPServer()
         assert RestartedServer.GetAuthToken() == ROTATED_TOKEN
+
+
+def test_filesystem_preferences_are_user_scoped_and_typed() -> None:
+    Addon = MagicMock()
+    Addon.preferences.filesystem_read_root = " C:/approved/read "
+    Addon.preferences.filesystem_write_root = " C:/approved/write "
+    Addon.preferences.allow_filesystem_overwrite = True
+
+    with patch("blender_mcp.bpy.context.preferences.addons.get", return_value=Addon):
+        assert BlenderMCPServer.GetFilesystemPreferences() == (
+            "C:/approved/read",
+            "C:/approved/write",
+            True,
+        )
+
+
+def test_invalid_filesystem_root_prevents_listener_start() -> None:
+    Server = BlenderMCPServer(host="127.0.0.1", port=0, auth_token=TOKEN)
+    try:
+        with patch.object(
+            Server,
+            "GetFilesystemPreferences",
+            return_value=("Z:/definitely/missing/root", "", False),
+        ):
+            assert Server.start() is False
+        assert Server.running is False
+        assert Server.socket is None
+    finally:
+        Server.stop()
+        ResetFilesystemPolicy()
 
 
 def test_socket_write_failure_is_indeterminate() -> None:

@@ -10,11 +10,11 @@ Implements:
 High Mode: Export anything, anywhere, perfectly.
 """
 
-from ..core.execution_engine import safe_ops
 from ..dispatcher import register_handler
 from ..core.parameter_validator import validated_handler
 from ..core.enums import ExportPipelineAction
 from ..core.response_builder import ResponseBuilder
+from ..core.security import Capability
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.validation_utils import ValidationUtils
 from ..core.export_pipeline import (
@@ -45,8 +45,54 @@ except ImportError:
     bpy = None
 
 
+ExportPipelineCapabilities = {
+    Action.value: [Capability.MUTATE.value] for Action in ExportPipelineAction
+}
+for ExportActionName in (
+    ExportPipelineAction.EXPORT_GLTF.value,
+    ExportPipelineAction.EXPORT_GLTF_DRACO.value,
+    ExportPipelineAction.EXPORT_USD.value,
+    ExportPipelineAction.EXPORT_ALEMBIC.value,
+    ExportPipelineAction.EXPORT_FBX.value,
+    ExportPipelineAction.EXPORT_OBJ.value,
+    ExportPipelineAction.EXPORT_ALL_FORMATS.value,
+    ExportPipelineAction.EXPORT_GAMEDEV_READY.value,
+):
+    ExportPipelineCapabilities[ExportActionName] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+ExportPipelineCapabilities[ExportPipelineAction.CHECK_EXPORT_PATH.value] = [
+    Capability.READ.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
+ExportPipelineCapabilities[ExportPipelineAction.VALIDATE_GLTF.value] = [
+    Capability.READ.value,
+    Capability.FILESYSTEM_READ.value,
+]
+ExportPipelineCapabilities[ExportPipelineAction.VALIDATE_FOR_EXPORT.value] = [
+    Capability.READ.value
+]
+
+
+def _ConcreteExportPath(Action: str | None, FilePath: str) -> str:
+    ExtensionsByAction = {
+        ExportPipelineAction.EXPORT_GLTF.value: ((".gltf", ".glb"), ".glb"),
+        ExportPipelineAction.EXPORT_GLTF_DRACO.value: ((".gltf", ".glb"), ".glb"),
+        ExportPipelineAction.EXPORT_USD.value: ((".usd", ".usda", ".usdc", ".usdz"), ".usd"),
+        ExportPipelineAction.EXPORT_ALEMBIC.value: ((".abc",), ".abc"),
+        ExportPipelineAction.EXPORT_FBX.value: ((".fbx",), ".fbx"),
+        ExportPipelineAction.EXPORT_OBJ.value: ((".obj",), ".obj"),
+    }
+    Rule = ExtensionsByAction.get(Action)
+    if Rule is None or FilePath.lower().endswith(Rule[0]):
+        return FilePath
+    return FilePath + Rule[1]
+
+
 @register_handler(
     "manage_export_pipeline",
+    capabilities=ExportPipelineCapabilities,
     schema={
         "type": "object",
         "title": "Export Pipeline Manager",
@@ -76,7 +122,7 @@ except ImportError:
             "presets": {"type": "object"},
             "formats": {
                 "type": "array",
-                "items": {"type": "string", "enum": ["GLB", "GLTF", "USD", "FBX", "OBJ"]},
+                "items": {"type": "string", "enum": ["GLB", "USD", "FBX", "OBJ"]},
                 "default": ["GLB", "FBX", "USD"],
             },
             # glTF/Draco settings
@@ -96,7 +142,7 @@ except ImportError:
             "force_export": {
                 "type": "boolean",
                 "default": False,
-                "description": "Bypass Export Armor if set to true (Agent assumes full responsibility for OOM/Crash)",
+                "description": "Deprecated security bypass. Requests with true are denied.",
             },
         },
         "required": ["action"],
@@ -115,6 +161,14 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
             action=action,
             error_code="NO_CONTEXT",
             message="Blender context not available",
+        )
+
+    if params.get("force_export", False):
+        return ResponseBuilder.error(
+            handler="manage_export_pipeline",
+            action=action,
+            error_code="FORCE_EXPORT_DENIED",
+            message="force_export cannot bypass local filesystem or resource policy",
         )
 
     # Get objects to export
@@ -178,16 +232,23 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
         # For batch operations or if no filepath, we might skip path check here
         # but we ALWAYS check geometry complexity.
         try:
-            force_export = params.get("force_export", False)
             # Geometry limits check
-            ExportValidator.validate_for_export(
-                objects, export_format=str(action), force_export=force_export
-            )
+            ExportValidator.validate_for_export(objects, export_format=str(action))
             # Path injection check (if single file variant)
             if filepath:
-                ExportValidator.check_export_path(
-                    filepath, overwrite=params.get("overwrite", False), force_export=force_export
+                filepath = _ConcreteExportPath(action, filepath)
+                PathCheck = ExportValidator.check_export_path(
+                    filepath,
+                    overwrite=params.get("overwrite", False),
                 )
+                if not PathCheck["valid"]:
+                    return ResponseBuilder.error(
+                        handler="manage_export_pipeline",
+                        action=action,
+                        error_code="INVALID_PATH",
+                        message="Export path failed validation",
+                        details={"issues": PathCheck["issues"]},
+                    )
 
         except ValueError as ve:
             return ResponseBuilder.error(
@@ -208,9 +269,14 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
 
             try:
-                filepath = PathValidator.validate_and_prepare(filepath, {".glb", ".gltf"})
+                filepath = PathValidator.validate_and_prepare(
+                    filepath,
+                    {".glb"},
+                    overwrite=params.get("overwrite", False),
+                )
             except Exception as e:
                 return ResponseBuilder.error(
                     handler="manage_export_pipeline",
@@ -243,9 +309,14 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
 
             try:
-                filepath = PathValidator.validate_and_prepare(filepath, {".glb", ".gltf"})
+                filepath = PathValidator.validate_and_prepare(
+                    filepath,
+                    {".glb"},
+                    overwrite=params.get("overwrite", False),
+                )
             except Exception as e:
                 return ResponseBuilder.error(
                     handler="manage_export_pipeline",
@@ -285,10 +356,13 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
 
             try:
                 filepath = PathValidator.validate_and_prepare(
-                    filepath, {".usd", ".usda", ".usdc", ".usdz"}
+                    filepath,
+                    {".usd", ".usda", ".usdc", ".usdz"},
+                    overwrite=params.get("overwrite", False),
                 )
             except Exception as e:
                 return ResponseBuilder.error(
@@ -316,6 +390,20 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
+            try:
+                filepath = PathValidator.validate_and_prepare(
+                    filepath,
+                    {".abc"},
+                    overwrite=params.get("overwrite", False),
+                )
+            except Exception as e:
+                return ResponseBuilder.error(
+                    handler="manage_export_pipeline",
+                    action=action,
+                    error_code="INVALID_PATH",
+                    message=str(e),
+                )
 
             return AlembicExporter.export_animation(  # type: ignore[no-any-return]
                 scene,
@@ -339,9 +427,14 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
 
             try:
-                filepath = PathValidator.validate_and_prepare(filepath, {".fbx"})
+                filepath = PathValidator.validate_and_prepare(
+                    filepath,
+                    {".fbx"},
+                    overwrite=params.get("overwrite", False),
+                )
             except Exception as e:
                 return ResponseBuilder.error(
                     handler="manage_export_pipeline",
@@ -367,9 +460,14 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     error_code="MISSING_PARAMETER",
                     message="Missing required parameter: 'filepath'",
                 )
+            filepath = _ConcreteExportPath(action, filepath)
 
             try:
-                filepath = PathValidator.validate_and_prepare(filepath, {".obj"})
+                filepath = PathValidator.validate_and_prepare(
+                    filepath,
+                    {".obj"},
+                    overwrite=params.get("overwrite", False),
+                )
             except Exception as e:
                 return ResponseBuilder.error(
                     handler="manage_export_pipeline",
@@ -435,16 +533,6 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     message="No mesh objects found. EXPORT_GAMEDEV_READY requires at least one MESH object.",
                 )
 
-            try:
-                os.makedirs(base_path, exist_ok=True)
-            except OSError as e:
-                return ResponseBuilder.error(
-                    handler="manage_export_pipeline",
-                    action=action,
-                    error_code="PATH_ERROR",
-                    message=f"Cannot create export directory: {e}",
-                )
-
             formats = [f.upper() for f in params.get("formats", ["GLB", "FBX", "USD"])]
             preset = params.get("preset", "game_engine")
             results: dict = {}
@@ -452,15 +540,19 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
 
             for fmt in formats:
                 try:
-                    if fmt in ("GLB", "GLTF"):
-                        ext = ".glb" if fmt == "GLB" else ".gltf"
+                    if fmt == "GLB":
+                        ext = ".glb"
                         fp = PathValidator.validate_and_prepare(
-                            os.path.join(base_path, f"export{ext}"), {".glb", ".gltf"}
+                            os.path.join(base_path, f"export{ext}"),
+                            {".glb"},
+                            overwrite=params.get("overwrite", False),
                         )
                         r = GLTFExporter.export(scene, mesh_objects, fp, preset=preset)
                     elif fmt == "FBX":
                         fp = PathValidator.validate_and_prepare(
-                            os.path.join(base_path, "export.fbx"), {".fbx"}
+                            os.path.join(base_path, "export.fbx"),
+                            {".fbx"},
+                            overwrite=params.get("overwrite", False),
                         )
                         r = FBXExporter.export(mesh_objects, fp, preset="unity")
                     elif fmt in ("USD", "USDA", "USDC", "USDZ"):
@@ -468,6 +560,7 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                         fp = PathValidator.validate_and_prepare(
                             os.path.join(base_path, f"export{ext}"),
                             {".usd", ".usda", ".usdc", ".usdz"},
+                            overwrite=params.get("overwrite", False),
                         )
                         r = USDExporter.export(scene, mesh_objects, fp)
                     else:
@@ -519,6 +612,7 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                 base_path,
                 formats=params.get("formats", ["GLB", "FBX", "USD"]),
                 presets=params.get("presets", {}),
+                overwrite=params.get("overwrite", False),
             )
 
         # Validation

@@ -12,6 +12,7 @@ MCP client
   -> dispatcher (registry -> action -> capability -> schema)
   -> ThreadSafety main-thread queue
   -> registered handler
+  -> user-scoped canonical filesystem boundary when the action performs file I/O
   -> dispatcher result and metadata
   -> correlated RESPONSE envelope
   -> original JSON-RPC response ID
@@ -37,7 +38,8 @@ Cold worker attempts fail closed instead of registering Blender callbacks from a
 4. The network thread must cross an explicit queue boundary before `bpy` work.
 5. Raw Python crosses from structured control into Blender-user code execution.
 6. Files, subprocesses, credentials, URLs, downloads, archives, native importers, and external
-   responses cross separate authority/content boundaries that are not yet fully hardened.
+   responses cross separate authority/content boundaries. The scene/export file family has an
+   initial root policy; other file and external surfaces are not yet fully hardened.
 7. `.blend` files are protected assets and untrusted inputs; Scene properties are project data.
 
 ## Existing Strengths
@@ -82,8 +84,10 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   It does not survive Blender restart and does not cover direct provider timer callbacks.
 - The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
   shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
-- Provider credentials remain Scene properties and existing file/network handlers remain outside a
-  central authority boundary. These prevent valuable-asset readiness.
+- Provider credentials remain Scene properties. Scene/export file sinks now use a central
+  user-scoped path authority. Multi-file glTF and USD texture sidecars are disabled, and external
+  asset packing is quarantined pending read grants, but remaining file/network handlers, other
+  sidecars, and string-path TOCTOU prevent valuable-asset readiness.
 
 ## Reference-Repositories Assessment
 

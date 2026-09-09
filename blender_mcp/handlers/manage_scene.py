@@ -25,6 +25,8 @@ from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
+from ..core.security import Capability
 from ..dispatcher import register_handler
 from ..utils.path import get_safe_path
 from ..core.enums import SceneAction
@@ -33,8 +35,20 @@ from ..core.validation_utils import ValidationUtils
 logger = get_logger()
 
 
+SceneCapabilities = {Action.value: [Capability.MUTATE.value] for Action in SceneAction}
+SceneCapabilities[SceneAction.OPEN_FILE.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_READ.value,
+]
+SceneCapabilities[SceneAction.SAVE_FILE.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
+
+
 @register_handler(
     "manage_scene",
+    capabilities=SceneCapabilities,
     priority=14,
     schema={
         "type": "object",
@@ -129,12 +143,18 @@ def _handle_open_file(**params: Any) -> Dict[str, Any]:
         )
 
     try:
-        safe_path = get_safe_path(path)
+        safe_path = get_safe_path(
+            path,
+            Access=FilesystemAccess.READ,
+            AllowedExtensions={".blend"},
+            CreateParents=False,
+        )
 
         # WARNING: open_mainfile resets entire Blender context
         def open_file() -> None:
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                safe_ops.wm.open_mainfile(filepath=safe_path)
+            OperatorResult = safe_ops.wm.open_mainfile(filepath=safe_path)
+            if not getattr(OperatorResult, "success", False):
+                raise RuntimeError("Blender file open operator failed")
 
         execute_on_main_thread(open_file, timeout=60.0)
 
@@ -145,6 +165,13 @@ def _handle_open_file(**params: Any) -> Dict[str, Any]:
                 "message": f"Opened {safe_path}",
                 "warning": "File opened. MCP connection may need to be reestablished.",
             },
+        )
+    except FilesystemPolicyError as Error:
+        return ResponseBuilder.error(
+            handler="manage_scene",
+            action=SceneAction.OPEN_FILE.value,
+            error_code=Error.Code,
+            message=Error.PublicMessage,
         )
     except Exception as e:
         logger.error(f"OPEN_FILE failed: {e}")
@@ -162,19 +189,43 @@ def _handle_save_file(**params: Any) -> Dict[str, Any]:
 
     try:
 
+        if path:
+            safe_path = get_safe_path(
+                path,
+                Access=FilesystemAccess.WRITE,
+                AllowedExtensions={".blend"},
+                CreateParents=True,
+            )
+        else:
+            CurrentPath = getattr(bpy.data, "filepath", "")
+            safe_path = get_safe_path(
+                CurrentPath,
+                Access=FilesystemAccess.WRITE,
+                AllowedExtensions={".blend"},
+                CreateParents=False,
+            )
+
         def save_file() -> None:
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                if path:
-                    safe_path = get_safe_path(path)
-                    safe_ops.wm.save_as_mainfile(filepath=safe_path)
-                else:
-                    safe_ops.wm.save_mainfile()
+            OperatorResult = (
+                safe_ops.wm.save_as_mainfile(filepath=safe_path)
+                if path
+                else safe_ops.wm.save_mainfile()
+            )
+            if not getattr(OperatorResult, "success", False):
+                raise RuntimeError("Blender file save operator failed")
 
         execute_on_main_thread(save_file, timeout=30.0)
         return ResponseBuilder.success(
             handler="manage_scene", action=SceneAction.SAVE_FILE.value, data={"message": "Saved"}
         )
 
+    except FilesystemPolicyError as Error:
+        return ResponseBuilder.error(
+            handler="manage_scene",
+            action=SceneAction.SAVE_FILE.value,
+            error_code=Error.Code,
+            message=Error.PublicMessage,
+        )
     except Exception as e:
         logger.error(f"SAVE_FILE failed: {e}")
         return ResponseBuilder.error(
@@ -507,6 +558,7 @@ def _handle_set_3d_cursor(**params: Any) -> Dict[str, Any]:
 
 @register_handler(
     "open_file",
+    capabilities={"open_file": [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]},
     schema={
         "type": "object",
         "properties": {
@@ -530,6 +582,7 @@ def open_file_alias(**params: Any) -> Dict[str, Any]:
 
 @register_handler(
     "save_file",
+    capabilities={"save_file": [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]},
     schema={
         "type": "object",
         "properties": {

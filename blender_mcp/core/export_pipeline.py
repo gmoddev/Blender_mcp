@@ -29,9 +29,39 @@ except ImportError:
 from .error_protocol import ErrorProtocol, create_error
 from .logging_config import get_logger
 from .context_manager_v3 import ContextManagerV3
+from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
 from .thread_safety import SafeOperators, ensure_main_thread
 
 logger = get_logger()
+
+
+def _MergeSafeExporterSettings(
+    BaseSettings: Dict[str, Any],
+    CustomSettings: Optional[Dict[str, Any]],
+    LockedSettings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge exporter settings without allowing secondary output paths."""
+    if CustomSettings is not None and not isinstance(CustomSettings, dict):
+        raise ValueError("Custom exporter settings must be an object")
+
+    LockedSettings = LockedSettings or {}
+    for SettingName in (CustomSettings or {}):
+        if not isinstance(SettingName, str):
+            raise ValueError("Custom exporter setting names must be strings")
+        NormalizedName = str(SettingName).lower()
+        if (
+            "path" in NormalizedName
+            or "directory" in NormalizedName
+            or NormalizedName.endswith("_dir")
+        ):
+            raise ValueError("Path-bearing custom exporter settings are not allowed")
+        if SettingName in LockedSettings:
+            raise ValueError("Output-family custom exporter settings are not allowed")
+
+    Settings = BaseSettings.copy()
+    Settings.update(CustomSettings or {})
+    Settings.update(LockedSettings)
+    return Settings
 
 
 class ExportFormat(Enum):
@@ -101,7 +131,7 @@ class GLTFExporter:
             "export_morph": True,
         },
         "archviz": {
-            "export_format": "GLTF_SEPARATE",
+            "export_format": "GLB",
             "export_draco_mesh_compression_enable": False,
             "export_image_format": "JPEG",
             "export_materials": "EXPORT",
@@ -141,15 +171,22 @@ class GLTFExporter:
 
         try:
             # Ensure filepath has correct extension
-            if not filepath.endswith((".gltf", ".glb")):
+            if filepath.lower().endswith(".gltf"):
+                raise ValueError("Multi-file glTF export is disabled until sidecars are authorized")
+            if not filepath.lower().endswith(".glb"):
                 filepath += ".glb"
-
-            # Get preset settings
-            settings = GLTFExporter.PRESETS.get(preset, GLTFExporter.PRESETS["game_engine"]).copy()
-
-            # Apply custom overrides
-            if custom_settings:
-                settings.update(custom_settings)
+            settings = _MergeSafeExporterSettings(
+                GLTFExporter.PRESETS.get(preset, GLTFExporter.PRESETS["game_engine"]),
+                custom_settings,
+                {"export_format": "GLB"},
+            )
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.WRITE,
+                {".glb"},
+                CreateParents=True,
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
 
             # Normalize image format for Blender 5.0+ compatibility
             if "export_image_format" in settings:
@@ -255,8 +292,12 @@ class GLTFExporter:
         Basic validation - for full validation use glTF Validator.
         """
         try:
-            if not os.path.exists(filepath):
-                return create_error(ErrorProtocol.OBJECT_NOT_FOUND, object_name=filepath)
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.READ,
+                {".gltf", ".glb"},
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
 
             import json
 
@@ -316,8 +357,8 @@ class USDExporter:
         "omniverse": {
             "export_materials": True,
             "generate_preview_surface": True,
-            "export_textures": True,
-            "overwrite_textures": True,
+            "export_textures": False,
+            "overwrite_textures": False,
         },
         "maya": {"export_materials": True, "convert_to_cm": True, "export_maya_collections": True},
         "houdini": {"export_materials": True, "export_subdiv": True, "export_houdini_attrs": True},
@@ -343,14 +384,20 @@ class USDExporter:
 
         try:
             # Ensure filepath has correct extension
-            if not filepath.endswith((".usd", ".usda", ".usdc", ".usdz")):
+            if not filepath.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
                 filepath += ".usd"
-
-            # Get preset settings
-            settings = USDExporter.PRESETS.get(preset, USDExporter.PRESETS["omniverse"]).copy()
-
-            if custom_settings:
-                settings.update(custom_settings)
+            settings = _MergeSafeExporterSettings(
+                USDExporter.PRESETS.get(preset, USDExporter.PRESETS["omniverse"]),
+                custom_settings,
+                {"export_textures": False, "overwrite_textures": False},
+            )
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.WRITE,
+                {".usd", ".usda", ".usdc", ".usdz"},
+                CreateParents=True,
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
 
             # Select objects
             ContextManagerV3.deselect_all_objects()
@@ -412,8 +459,15 @@ class AlembicExporter:
 
         try:
             # Ensure filepath has correct extension
-            if not filepath.endswith(".abc"):
+            if not filepath.lower().endswith(".abc"):
                 filepath += ".abc"
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.WRITE,
+                {".abc"},
+                CreateParents=True,
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
 
             # Use scene frame range if not specified
             if frame_start is None:
@@ -515,14 +569,20 @@ class FBXExporter:
 
         try:
             # Ensure filepath has correct extension
-            if not filepath.endswith(".fbx"):
+            if not filepath.lower().endswith(".fbx"):
                 filepath += ".fbx"
-
-            # Get preset settings
-            settings = FBXExporter.PRESETS.get(preset, FBXExporter.PRESETS["unity"]).copy()
-
-            if custom_settings:
-                settings.update(custom_settings)
+            settings = _MergeSafeExporterSettings(
+                FBXExporter.PRESETS.get(preset, FBXExporter.PRESETS["unity"]),
+                custom_settings,
+                {"path_mode": "STRIP"},
+            )
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.WRITE,
+                {".fbx"},
+                CreateParents=True,
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
 
             # Fix: FBX requires actual ViewLayer manipulation, Context Override is unreliable
             view_layer = bpy.context.view_layer
@@ -589,6 +649,7 @@ class BatchExporter:
         base_path: str,
         formats: Optional[List[str]] = None,
         presets: Optional[Dict[str, str]] = None,
+        overwrite: bool = False,
     ) -> Dict[str, Any]:
         """
         Export to multiple formats in one operation.
@@ -611,14 +672,35 @@ class BatchExporter:
             errors = []
 
             base = Path(base_path)
+            ExtensionByFormat = {
+                "GLB": ".glb",
+                "USD": ".usd",
+                "FBX": ".fbx",
+                "OBJ": ".obj",
+            }
 
             for fmt in formats:
                 fmt = fmt.upper()
-                filepath = str(base.with_suffix(f".{fmt.lower()}"))
+                Extension = ExtensionByFormat.get(fmt)
+                if Extension is None:
+                    errors.append(f"Unsupported format: {fmt}")
+                    continue
+                filepath = str(base.with_suffix(Extension))
                 presets.get(fmt, "default")
 
                 try:
-                    if fmt in ["GLTF", "GLB"]:
+                    PathDecision = GetFilesystemPolicy().RequirePath(
+                        filepath,
+                        FilesystemAccess.WRITE,
+                        {Extension},
+                        CreateParents=True,
+                    )
+                    filepath = cast(str, PathDecision.ResolvedPath)
+                    if os.path.exists(filepath) and not overwrite:
+                        errors.append(f"{fmt}: target exists and overwrite was not requested")
+                        continue
+
+                    if fmt == "GLB":
                         result = GLTFExporter.export(
                             scene, objects, filepath, preset=presets.get(fmt, "game_engine")
                         )
@@ -632,9 +714,6 @@ class BatchExporter:
                         )
                     elif fmt == "OBJ":
                         result = BatchExporter._export_obj(objects, filepath)
-                    else:
-                        errors.append(f"Unsupported format: {fmt}")
-                        continue
 
                     if "error" in result:
                         errors.append(f"{fmt}: {result['error']}")
@@ -668,6 +747,16 @@ class BatchExporter:
         use_triangles→export_triangulated_mesh.
         SafeOperators.export_obj tries wm.obj_export first; we pass the new-style params.
         """
+        if not filepath.lower().endswith(".obj"):
+            filepath += ".obj"
+        PathDecision = GetFilesystemPolicy().RequirePath(
+            filepath,
+            FilesystemAccess.WRITE,
+            {".obj"},
+            CreateParents=True,
+        )
+        filepath = cast(str, PathDecision.ResolvedPath)
+
         ContextManagerV3.deselect_all_objects()
         for obj in objects:
             if obj:
@@ -749,8 +838,8 @@ class ExportValidator:
             issues.append("No objects selected for export")
 
         # 1) Export Armor: Geometry Complexity Check
-        if not force_export:
-            ExportValidator.check_geometry_complexity(objects)
+        del force_export
+        ExportValidator.check_geometry_complexity(objects)
 
         for obj in objects:
             if getattr(obj, "type", "") == "MESH":
@@ -789,54 +878,12 @@ class ExportValidator:
         PRE-FLIGHT INTERCEPTOR: Prevent Path Traversal (LFI) attacks.
         Raises ValueError if the path tries to escape the allowed workspace context.
         """
-        if force_export:
-            logger.warning(f"SECURITY BYPASS: force_export=True used for path {filepath}")
-            return
-
-        abs_path = os.path.abspath(filepath)
-
-        # System directory blocklist — always enforced (risk.md Scenario 2)
-        _SYSTEM_BLOCKLIST = tuple(
-            os.path.abspath(p)
-            for p in [
-                "C:\\Windows",
-                "C:\\Program Files",
-                "C:\\Program Files (x86)",
-                "/usr",
-                "/etc",
-                "/bin",
-                "/sbin",
-                "/boot",
-                "/sys",
-                "/proc",
-            ]
+        del force_export
+        GetFilesystemPolicy().RequirePath(
+            filepath,
+            FilesystemAccess.WRITE,
+            CreateParents=False,
         )
-        if any(abs_path.startswith(blocked) for blocked in _SYSTEM_BLOCKLIST):
-            raise ValueError(
-                f"[SECURITY BLOCK] Export path '{abs_path}' targets a protected system directory. "
-                "Use a path within your home directory or project workspace."
-            )
-
-        # Multi-fallback workspace resolution (BUG-01: os.getcwd() returns Blender install dir)
-        workspace_dir: Optional[str] = None
-        # Fallback 1: directory of the open .blend file (empty string if unsaved)
-        if BPY_AVAILABLE:
-            try:
-                blend_dir = bpy.path.abspath("//")
-                if blend_dir and os.path.isdir(blend_dir):
-                    workspace_dir = os.path.abspath(blend_dir)
-            except Exception:
-                pass
-        # Fallback 2: user home directory
-        if workspace_dir is None:
-            workspace_dir = os.path.abspath(str(Path.home()))
-
-        if not abs_path.startswith(workspace_dir):
-            raise ValueError(
-                f"[SECURITY BLOCK] Path Traversal Detected! "
-                f"Export path '{abs_path}' escapes the active workspace directory '{workspace_dir}'. "
-                "Agent Action Required: Ensure filepath stays within the workspace, or add force_export=True to bypass."
-            )
 
     @staticmethod
     def check_export_path(
@@ -846,18 +893,19 @@ class ExportValidator:
         Check export path is valid.
         """
         # 1) Export Armor: Security Check
-        ExportValidator.check_path_injection(filepath, force_export=force_export)
+        del force_export
+        PathDecision = GetFilesystemPolicy().RequirePath(
+            filepath,
+            FilesystemAccess.WRITE,
+            CreateParents=False,
+        )
+        AuthorizedPath = cast(str, PathDecision.ResolvedPath)
 
         issues = []
 
-        # Check directory exists
-        dir_path = os.path.dirname(filepath)
-        if dir_path and not os.path.exists(dir_path):
-            issues.append(f"Directory does not exist: {dir_path}")
-
         # Check file exists
-        if os.path.exists(filepath) and not overwrite:
-            issues.append(f"File exists (use overwrite=True): {filepath}")
+        if os.path.exists(AuthorizedPath) and not overwrite:
+            issues.append("Target exists and overwrite was not requested")
 
         # Check extension
         valid_extensions = {
@@ -874,11 +922,15 @@ class ExportValidator:
             ".ply",
             ".x3d",
         }
-        ext = os.path.splitext(filepath)[1].lower()
+        ext = os.path.splitext(AuthorizedPath)[1].lower()
         if ext not in valid_extensions:
-            issues.append(f"Unknown extension: {ext}")
+            issues.append("Unknown or missing export extension")
 
-        return {"valid": len(issues) == 0, "issues": issues, "filepath": filepath}
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "filepath": AuthorizedPath,
+        }
 
 
 # =============================================================================

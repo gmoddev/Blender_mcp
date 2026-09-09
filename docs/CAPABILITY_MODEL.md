@@ -29,5 +29,8 @@ New handlers must supply action-level capability metadata to `register_handler`.
 after tool/action lookup and before schema processing or handler invocation. A UI label never grants
 authority by itself; tests must exercise the dispatcher boundary.
 
-External integrations and filesystem/process actions remain denied when explicitly classified with
-their dedicated capabilities until Foundation 0E-0G provide user-controlled policy.
+`FILESYSTEM_READ` and `FILESYSTEM_WRITE` are granted only when the corresponding validated,
+user-scoped root was snapshotted before listener startup. Safe Mode can use an explicitly audited
+`READ` plus `FILESYSTEM_READ` action, but never a filesystem mutation. Network, process, and
+credential capabilities remain denied until their later foundations provide user-controlled
+policy. See ADR 0006 and `docs/FILESYSTEM_BOUNDARY.md`.

@@ -96,6 +96,29 @@ filesystem authority boundary (0E), followed by the purpose-scoped network/downl
 (0F), OS-backed provider credentials (0G), and provider jobs that preserve the original MCP request
 identity across off-main-thread preparation and main-thread commit.
 
+## Fourth Implementation Slice: Foundation 0E scene/export authority
+
+The first filesystem-authority slice introduces separate user-approved read and write roots,
+snapshotted before the listener starts. Empty or invalid roots deny; relative paths resolve under
+the applicable root; canonical component containment rejects traversal, sibling prefixes, links,
+network/device paths, ambiguous Windows names, directories, and multiply-linked files. Parent
+directories are created only after authorization and the concrete path is revalidated.
+
+Scene `.blend` I/O, standard and pipeline exports, batch and Unity exports, UV layout export, and
+cloud current-file saves now enforce the boundary at their final path. Existing writes require a
+local overwrite preference, and export-pipeline replacements also require per-request intent.
+`force_export` is rejected instead of bypassing policy. Migrated dispatcher actions declare their
+dedicated filesystem capabilities. Multi-file glTF and USD texture sidecars are disabled; arbitrary
+path-bearing exporter settings are rejected. Cloud asset packaging is quarantined until linked
+inputs can be enumerated and authorized for read before Blender packs them.
+
+This is not completion of 0E. Blender's string-path APIs retain a local TOCTOU window, and rendering,
+captures, sequencer media, imports, caches, provider artifacts, subprocess paths, and remaining
+sidecars still need a complete sink and capability audit. Blender 5.2.1 passes the disposable open/save/export,
+overwrite-sentinel, and Windows-junction checks; supported POSIX remains pending. The effective
+contract and limitations are in `docs/FILESYSTEM_BOUNDARY.md` and ADR 0006. Next is completion of
+the remaining file surfaces before 0F network/download/archive work.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

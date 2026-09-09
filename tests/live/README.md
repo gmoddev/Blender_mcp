@@ -24,3 +24,17 @@ Covered controls:
 - a lost socket response can be reconciled after reconnect;
 - handler execution stays on Blender's main thread;
 - shutdown tombstones queued work and unregisters the persistent timer.
+
+## Filesystem boundary
+
+Run the path-authority checks directly in a disposable background Blender process:
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_filesystem_boundary.py
+```
+
+The script creates only a uniquely named directory under the OS temporary directory. It checks
+outside-root save/open/export denial, sentinel preservation, explicit local overwrite approval, an
+approved GLB export, and a Windows junction escape when junction creation is available, then removes
+the temporary directory.

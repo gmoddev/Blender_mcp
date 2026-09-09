@@ -72,9 +72,22 @@ class SecurityManager:
             return False
 
         if SecurityManager.is_safe_mode():
-            return Required.issubset({Capability.READ})
+            Allowed = {Capability.READ}
+            from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
+
+            Policy = GetFilesystemPolicy()
+            if Policy.HasRoot(FilesystemAccess.READ):
+                Allowed.add(Capability.FILESYSTEM_READ)
+            return Required.issubset(Allowed)
 
         Allowed = {Capability.READ, Capability.MUTATE}
+        from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
+
+        Policy = GetFilesystemPolicy()
+        if Policy.HasRoot(FilesystemAccess.READ):
+            Allowed.add(Capability.FILESYSTEM_READ)
+        if Policy.HasRoot(FilesystemAccess.WRITE):
+            Allowed.add(Capability.FILESYSTEM_WRITE)
         if SecurityManager.is_raw_code_enabled():
             Allowed.add(Capability.EXECUTE_CODE)
         return Required.issubset(Allowed)

@@ -25,6 +25,8 @@ means the invariant is required but not yet proven by the current implementation
 | INPUT-001 | Untrusted lengths, paths, URLs, schemas, and imported asset metadata are bounded and validated before use. | Boundary and traversal tests. | Partial |
 | EXT-001 | Hunyuan external actions cannot perform file, network, archive, timer, credential, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, and bypass-input tests. | Enforced by quarantine after Blender restart; provider functionality intentionally unavailable |
 | EXT-002 | External-integration status distinguishes saved configuration from operational availability and performs no external I/O. | Safe Mode status and truthful-field assertions. | Enforced for Hunyuan |
+| FS-001 | A migrated file action reaches a Blender/file sink only with a canonical regular-file path contained beneath the matching user-approved read or write root. | Traversal, sibling-prefix, link, Windows ambiguity, final-extension, direct-caller, and legitimate-path tests. | Partial: scene/export family passes Windows unit and Blender 5.2.1 open/save/export plus junction checks; POSIX and remaining file surfaces pending |
+| FS-002 | Existing outputs are not replaced unless overwrite is enabled locally; export actions with request-level overwrite intent require both decisions. | Sentinel-file and denied-operator tests. | Partial: migrated scene/export family passes unit and live Blender sentinel/approved-overwrite checks; atomic publication remains pending |
 | ERROR-001 | Boundary failures return structured, redacted errors without modal or focus-stealing UI. | UI behavior review and error-contract tests. | Partial: protocol/auth structured; live UI pending |
 | REC-001 | After disconnect or indeterminate completion, a client can query execution state and reconcile scene state before retrying. | Disconnect/reconnect integration test. | Partial: live in-process reconnect/reconciliation enforced; process restart and direct callbacks remain unknown |
 | LIC-001 | Copied or adapted code retains required copyright and license notices with provenance. | Release checklist and dependency/source inventory. | Target |
@@ -45,6 +47,11 @@ means the invariant is required but not yet proven by the current implementation
   by the retired implementation.
 - The primary bridge/server/dispatcher log path is metadata-only; provider and job logging still
   require a repository-wide canary audit.
+- The scene/export family now uses explicit read/write roots and local overwrite approval. GLB is
+  single-file only, USD texture sidecars are off, and asset packing is quarantined pending per-input
+  read grants. Other file surfaces, sidecars, atomic publication, supported POSIX behavior, and
+  broader live Blender operators remain Foundation 0E work. Blender 5.2.1 passes its disposable
+  file-operator harness.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
 - `pyproject.toml` and `LICENSE`: package metadata disagrees about the license.
 
