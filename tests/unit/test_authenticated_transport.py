@@ -180,3 +180,32 @@ def test_rotation_revokes_authenticated_socket() -> None:
     finally:
         Bridge.CloseConnection()
         Server.stop()
+
+
+def test_server_preserves_structured_lifecycle_error_fields() -> None:
+    Server = BlenderMCPServer(auth_token=TOKEN)
+    DispatcherResult = {
+        "error": "Command was running at timeout",
+        "code": "REQUEST_INDETERMINATE",
+        "command_state": "running_after_timeout",
+        "retry_safe": False,
+        "terminal": False,
+        "_meta": {
+            "request_id": "lifecycle-error",
+            "command_state": "running_after_timeout",
+        },
+    }
+    with patch("blender_mcp.dispatcher.dispatch_command", return_value=DispatcherResult):
+        Result = Server._execute_command_internal(
+            {
+                "tool": "list_all_tools",
+                "params": {"action": "list_all_tools"},
+                "request_id": "lifecycle-error",
+            }
+        )
+
+    assert Result["status"] == "error"
+    assert Result["error"]["code"] == "REQUEST_INDETERMINATE"
+    assert Result["error"]["command_state"] == "running_after_timeout"
+    assert Result["error"]["retry_safe"] is False
+    assert Result["_meta"]["request_id"] == "lifecycle-error"

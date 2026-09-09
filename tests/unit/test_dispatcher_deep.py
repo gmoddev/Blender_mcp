@@ -34,6 +34,7 @@ from blender_mcp.dispatcher import (  # noqa: E402
     _format_tool_full,
     _format_tool_row,
 )
+from blender_mcp.core.thread_safety import ThreadSafety  # noqa: E402
 
 load_handlers()
 
@@ -433,6 +434,152 @@ class TestGetServerStatus:
         )
         assert isinstance(result.get("tools"), list)
         assert len(result["tools"]) > 0
+
+
+class TestCommandLifecycleDispatch:
+    def test_wire_request_id_reaches_queue_and_response_state(self) -> None:
+        @register_handler(
+            "_test_lifecycle_dispatch",
+            actions=["DO"],
+            schema={
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["DO"]}},
+                "required": ["action"],
+            },
+            category="test",
+        )
+        def _test_lifecycle_dispatch(**params):
+            return {"value": 7}
+
+        try:
+            with (
+                patch("blender_mcp.dispatcher.is_main_thread", return_value=False),
+                patch.object(
+                    ThreadSafety,
+                    "ExecuteRequest",
+                    return_value={"value": 7},
+                ) as ExecuteRequest,
+                patch.object(
+                    ThreadSafety,
+                    "GetRequestStatus",
+                    return_value={"state": "completed", "terminal": True},
+                ),
+            ):
+                Result = dispatch_command(
+                    {
+                        "tool": "_test_lifecycle_dispatch",
+                        "params": {"action": "DO"},
+                        "request_id": "wire-request-19",
+                    }
+                )
+
+            assert ExecuteRequest.call_args.kwargs["RequestId"] == "wire-request-19"
+            assert len(ExecuteRequest.call_args.kwargs["RequestDigest"]) == 64
+            assert Result["_meta"]["command_state"] == "completed"
+        finally:
+            HANDLER_REGISTRY.pop("_test_lifecycle_dispatch", None)
+            HANDLER_METADATA.pop("_test_lifecycle_dispatch", None)
+
+    def test_caller_cannot_force_immediate_queue_timeout(self) -> None:
+        @register_handler(
+            "_test_timeout_bounds",
+            actions=["DO"],
+            schema={
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["DO"]}},
+                "required": ["action"],
+            },
+            category="test",
+        )
+        def _test_timeout_bounds(**params):
+            return {"value": 1}
+
+        try:
+            with (
+                patch("blender_mcp.dispatcher.is_main_thread", return_value=False),
+                patch.object(ThreadSafety, "ExecuteRequest") as ExecuteRequest,
+            ):
+                Result = dispatch_command(
+                    {
+                        "tool": "_test_timeout_bounds",
+                        "params": {"action": "DO", "timeout_seconds": 0},
+                        "request_id": "invalid-timeout",
+                    }
+                )
+
+            assert Result["code"] == "INVALID_TIMEOUT"
+            ExecuteRequest.assert_not_called()
+        finally:
+            HANDLER_REGISTRY.pop("_test_timeout_bounds", None)
+            HANDLER_METADATA.pop("_test_timeout_bounds", None)
+
+    def test_reconciliation_handler_bypasses_main_thread_queue(self) -> None:
+        Metadata = HANDLER_METADATA["manage_command_lifecycle"]
+        assert Metadata["requires_main_thread"] is False
+
+        with (
+            patch("blender_mcp.dispatcher.is_main_thread", return_value=False),
+            patch.object(ThreadSafety, "ExecuteRequest") as ExecuteRequest,
+            patch.object(ThreadSafety, "GetRequestStatus", return_value=None),
+        ):
+            Result = dispatch_command(
+                {
+                    "tool": "manage_command_lifecycle",
+                    "params": {
+                        "action": "GET_STATUS",
+                        "target_request_id": "unknown-request",
+                    },
+                    "request_id": "status-query",
+                }
+            )
+
+        assert Result["code"] == "REQUEST_NOT_FOUND"
+        ExecuteRequest.assert_not_called()
+
+    def test_failed_mutation_preserves_terminal_lifecycle_metadata(self) -> None:
+        @register_handler(
+            "_test_failed_lifecycle",
+            actions=["DO"],
+            schema={
+                "type": "object",
+                "properties": {"action": {"type": "string", "enum": ["DO"]}},
+                "required": ["action"],
+            },
+            category="test",
+        )
+        def _test_failed_lifecycle(**params):
+            raise ValueError("handler failure")
+
+        try:
+            with (
+                patch("blender_mcp.dispatcher.is_main_thread", return_value=False),
+                patch.object(ThreadSafety, "ExecuteRequest", side_effect=ValueError("failed")),
+                patch.object(
+                    ThreadSafety,
+                    "GetRequestStatus",
+                    return_value={
+                        "state": "failed",
+                        "terminal": True,
+                        "retry_safe": False,
+                    },
+                ),
+            ):
+                Result = dispatch_command(
+                    {
+                        "tool": "_test_failed_lifecycle",
+                        "params": {"action": "DO"},
+                        "request_id": "failed-request",
+                    }
+                )
+
+            assert Result["code"] == "EXECUTION_ERROR"
+            assert Result["command_state"] == "failed"
+            assert Result["terminal"] is True
+            assert Result["retry_safe"] is False
+            assert Result["_meta"]["request_id"] == "failed-request"
+        finally:
+            HANDLER_REGISTRY.pop("_test_failed_lifecycle", None)
+            HANDLER_METADATA.pop("_test_failed_lifecycle", None)
 
 
 # ---------------------------------------------------------------------------

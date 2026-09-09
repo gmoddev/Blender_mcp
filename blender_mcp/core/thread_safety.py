@@ -8,14 +8,16 @@ High Mode Philosophy: Thread-safe execution without limiting functionality.
 Performance Target: <100ms latency for all operations.
 """
 
+import functools
+import json
 import queue
 import threading
-import functools
 import time
 import uuid
-from typing import Callable, Any, Optional, Dict, List, Tuple
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .logging_config import get_logger
 
@@ -36,7 +38,70 @@ class ExecutionStatus(Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    TIMEOUT = "timeout"
+    CANCEL_REQUESTED = "cancel_requested"
+    CANCELLED = "cancelled"
+    TIMED_OUT_PENDING = "timed_out_pending"
+    RUNNING_AFTER_TIMEOUT = "running_after_timeout"
+    COMPLETED_LATE = "completed_late"
+    FAILED_LATE = "failed_late"
+    COMPLETED_RESULT_DROPPED = "completed_result_dropped"
+    COMPLETED_LATE_RESULT_DROPPED = "completed_late_result_dropped"
+    TIMEOUT = "timed_out_pending"  # Compatibility alias; use TIMED_OUT_PENDING.
+
+
+TERMINAL_STATUSES = frozenset(
+    {
+        ExecutionStatus.COMPLETED,
+        ExecutionStatus.FAILED,
+        ExecutionStatus.CANCELLED,
+        ExecutionStatus.TIMED_OUT_PENDING,
+        ExecutionStatus.COMPLETED_LATE,
+        ExecutionStatus.FAILED_LATE,
+        ExecutionStatus.COMPLETED_RESULT_DROPPED,
+        ExecutionStatus.COMPLETED_LATE_RESULT_DROPPED,
+    }
+)
+SUCCESS_STATUSES = frozenset({ExecutionStatus.COMPLETED, ExecutionStatus.COMPLETED_LATE})
+FAILED_STATUSES = frozenset({ExecutionStatus.FAILED, ExecutionStatus.FAILED_LATE})
+
+RESULT_DROPPED_STATUSES = frozenset(
+    {
+        ExecutionStatus.COMPLETED_RESULT_DROPPED,
+        ExecutionStatus.COMPLETED_LATE_RESULT_DROPPED,
+    }
+)
+
+MAX_LEDGER_ENTRIES = 4096
+LEDGER_RETENTION_SECONDS = 15 * 60.0
+MAX_RETAINED_RESULT_BYTES = 4 * 1024 * 1024
+MAX_LEDGER_RESULT_BYTES = 32 * 1024 * 1024
+
+
+def _NoOp() -> None:
+    """Release a completed command's callable without changing its public shape."""
+
+
+class CommandLifecycleError(RuntimeError):
+    """Structured lifecycle failure suitable for dispatcher error responses."""
+
+    def __init__(
+        self,
+        Code: str,
+        Message: str,
+        RequestId: str,
+        Status: ExecutionStatus,
+        RetrySafe: bool,
+    ) -> None:
+        super().__init__(Message)
+        self.Code = Code
+        self.PublicMessage = Message
+        self.RequestId = RequestId
+        self.Status = Status
+        self.RetrySafe = RetrySafe
+
+
+class CommandTimeoutError(CommandLifecycleError, TimeoutError):
+    """Timeout whose state distinguishes non-execution from indeterminate execution."""
 
 
 @dataclass
@@ -63,19 +128,110 @@ class MCPCommand:
     status: ExecutionStatus = ExecutionStatus.PENDING
     start_time: float = field(default_factory=time.time)
     end_time: Optional[float] = None
+    RequestDigest: str = ""
+    StateLock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    ResultPolicy: Optional[Callable[[Any], Tuple[bool, int, Optional[str]]]] = field(
+        default=None, repr=False
+    )
+    ResultByteSize: int = 0
+    ResultUnavailableReason: Optional[str] = None
 
-    def execute(self) -> None:
-        """Execute the command and signal completion."""
-        self.status = ExecutionStatus.RUNNING
-        try:
-            self.result = self.func(*self.args, **self.kwargs)
-            self.status = ExecutionStatus.COMPLETED
-        except Exception as e:
-            self.error = e
-            self.status = ExecutionStatus.FAILED
-        finally:
+    def TryStart(self) -> bool:
+        """Atomically claim a pending command for main-thread execution."""
+        with self.StateLock:
+            if self.status != ExecutionStatus.PENDING:
+                return False
+            self.status = ExecutionStatus.RUNNING
+            return True
+
+    def MarkTimedOut(self) -> ExecutionStatus:
+        """Tombstone pending work or mark already-running work indeterminate."""
+        with self.StateLock:
+            if self.status == ExecutionStatus.PENDING:
+                self.status = ExecutionStatus.TIMED_OUT_PENDING
+                self.end_time = time.time()
+                self.event.set()
+            elif self.status == ExecutionStatus.RUNNING:
+                self.status = ExecutionStatus.RUNNING_AFTER_TIMEOUT
+            return self.status
+
+    def Cancel(self) -> bool:
+        """Cancel only work that has not been claimed by the queue consumer."""
+        with self.StateLock:
+            if self.status != ExecutionStatus.PENDING:
+                return False
+            self.status = ExecutionStatus.CANCEL_REQUESTED
+            self.status = ExecutionStatus.CANCELLED
             self.end_time = time.time()
             self.event.set()
+            return True
+
+    def Snapshot(self, IncludeResult: bool = True) -> Dict[str, Any]:
+        """Return a synchronized, wire-safe view of the command lifecycle."""
+        with self.StateLock:
+            Snapshot: Dict[str, Any] = {
+                "request_id": self.id,
+                "state": self.status.value,
+                "terminal": self.status in TERMINAL_STATUSES,
+                "retry_safe": self.status
+                in {ExecutionStatus.TIMED_OUT_PENDING, ExecutionStatus.CANCELLED},
+                "result_available": self.status in SUCCESS_STATUSES,
+                "started_at": self.start_time,
+                "ended_at": self.end_time,
+                "duration_ms": self.duration_ms,
+            }
+            if IncludeResult and self.status in SUCCESS_STATUSES:
+                Snapshot["result"] = self.result
+            if self.status in RESULT_DROPPED_STATUSES:
+                Snapshot["result_unavailable_reason"] = self.ResultUnavailableReason
+            if self.status in FAILED_STATUSES:
+                Snapshot["error_type"] = type(self.error).__name__ if self.error else "RuntimeError"
+            return Snapshot
+
+    def execute(self) -> bool:
+        """Execute only when the pending-to-running claim succeeds."""
+        if not self.TryStart():
+            return False
+        try:
+            Result = self.func(*self.args, **self.kwargs)
+            RetainResult = True
+            ResultByteSize = 0
+            UnavailableReason = None
+            if self.ResultPolicy is not None:
+                RetainResult, ResultByteSize, UnavailableReason = self.ResultPolicy(Result)
+            with self.StateLock:
+                self.ResultByteSize = ResultByteSize
+                if RetainResult:
+                    self.result = Result
+                    if self.status == ExecutionStatus.RUNNING_AFTER_TIMEOUT:
+                        self.status = ExecutionStatus.COMPLETED_LATE
+                    elif self.status == ExecutionStatus.RUNNING:
+                        self.status = ExecutionStatus.COMPLETED
+                else:
+                    self.result = None
+                    self.ResultUnavailableReason = UnavailableReason
+                    if self.status == ExecutionStatus.RUNNING_AFTER_TIMEOUT:
+                        self.status = ExecutionStatus.COMPLETED_LATE_RESULT_DROPPED
+                    elif self.status == ExecutionStatus.RUNNING:
+                        self.status = ExecutionStatus.COMPLETED_RESULT_DROPPED
+        except Exception as Error:
+            Error.__traceback__ = None
+            Error.__context__ = None
+            Error.__cause__ = None
+            with self.StateLock:
+                self.error = Error
+                if self.status == ExecutionStatus.RUNNING_AFTER_TIMEOUT:
+                    self.status = ExecutionStatus.FAILED_LATE
+                elif self.status == ExecutionStatus.RUNNING:
+                    self.status = ExecutionStatus.FAILED
+        finally:
+            with self.StateLock:
+                self.end_time = time.time()
+                self.func = _NoOp
+                self.args = ()
+                self.kwargs = {}
+                self.event.set()
+        return True
 
     @property
     def duration_ms(self) -> float:
@@ -118,6 +274,13 @@ class ThreadSafety:
         self._initialized = True
         self._task_queue: queue.Queue[MCPCommand] = queue.Queue()
         self._active_tasks: Dict[str, MCPCommand] = {}
+        self._request_ledger: OrderedDict[str, MCPCommand] = OrderedDict()
+        self._ledger_lock = threading.RLock()
+        self._MaxLedgerEntries = MAX_LEDGER_ENTRIES
+        self._LedgerRetentionSeconds = LEDGER_RETENTION_SECONDS
+        self._MaxRetainedResultBytes = MAX_RETAINED_RESULT_BYTES
+        self._MaxLedgerResultBytes = MAX_LEDGER_RESULT_BYTES
+        self._LedgerResultBytes = 0
         self._timer_registered = False
         self._stats = {
             "total_executed": 0,
@@ -247,7 +410,7 @@ class ThreadSafety:
             self._timer_registered = True
             return True
         except Exception as e:
-            logger.error(f"[MCP ThreadSafety] Timer registration failed: {e}")
+            logger.error(f"[BlenderMCP:CommandQueue] Timer registration failed: {e}")
             return False
 
     def _process_queue(self) -> Optional[float]:
@@ -270,18 +433,25 @@ class ThreadSafety:
             except queue.Empty:
                 break
 
-            # Execute task
-            task.execute()
+            # Claim and execute atomically. Tombstoned commands are drained but
+            # never invoke their callable.
+            DidExecute = task.execute()
+
+            with self._ledger_lock:
+                if task.status in TERMINAL_STATUSES:
+                    self._active_tasks.pop(task.id, None)
 
             # Update stats
-            self._stats["total_executed"] += 1
-            if task.status == ExecutionStatus.FAILED:
+            if DidExecute:
+                self._stats["total_executed"] += 1
+            if DidExecute and task.status in FAILED_STATUSES:
                 self._stats["total_failed"] += 1
 
             # Update average latency
-            n = self._stats["total_executed"]
-            current_avg = self._stats["avg_latency_ms"]
-            self._stats["avg_latency_ms"] = ((n - 1) * current_avg + task.duration_ms) / n
+            if DidExecute:
+                n = self._stats["total_executed"]
+                current_avg = self._stats["avg_latency_ms"]
+                self._stats["avg_latency_ms"] = ((n - 1) * current_avg + task.duration_ms) / n
 
             processed += 1
 
@@ -327,40 +497,275 @@ class ThreadSafety:
             return func(*args, **kwargs)
 
         instance = cls()
-        instance._ensure_timer()
+        RequestId = str(uuid.uuid4())
+        return instance.ExecuteRequest(
+            func,
+            RequestId=RequestId,
+            RequestDigest=f"internal:{RequestId}",
+            Timeout=timeout,
+            Args=args,
+            Kwargs=kwargs,
+            ToolId=tool_id,
+            Intent=intent,
+        )
 
-        # Create MCP Command
-        cmd = MCPCommand(func=func, args=args, kwargs=kwargs, tool_id=tool_id, intent=intent)
+    def ExecuteRequest(
+        self,
+        Func: Callable[..., Any],
+        *,
+        RequestId: str,
+        RequestDigest: str,
+        Timeout: float,
+        Args: Tuple[Any, ...] = (),
+        Kwargs: Optional[Dict[str, Any]] = None,
+        ToolId: Optional[str] = None,
+        Intent: Optional[str] = None,
+    ) -> Any:
+        """Execute or reconcile one request through the bounded command ledger."""
+        if not self._ensure_timer():
+            raise CommandLifecycleError(
+                "MAIN_THREAD_UNAVAILABLE",
+                "Blender main-thread scheduling is unavailable",
+                RequestId,
+                ExecutionStatus.CANCELLED,
+                True,
+            )
 
-        instance._task_queue.put(cmd)
-        instance._active_tasks[cmd.id] = cmd
+        Command, IsNew = self._GetCommand(
+            Func,
+            RequestId,
+            RequestDigest,
+            Args,
+            Kwargs or {},
+            ToolId,
+            Intent,
+        )
+        if IsNew:
+            self._task_queue.put(Command)
+        else:
+            return self._ResolveCommand(Command, IsDuplicate=True)
 
-        # Wait for completion
-        if not cmd.event.wait(timeout):
-            cmd.status = ExecutionStatus.TIMEOUT
-            del instance._active_tasks[cmd.id]
+        if not Command.event.wait(Timeout):
+            State = Command.MarkTimedOut()
+            if State == ExecutionStatus.TIMED_OUT_PENDING:
+                with self._ledger_lock:
+                    self._active_tasks.pop(Command.id, None)
+            return self._ResolveCommand(Command)
+        return self._ResolveCommand(Command)
 
-            # Log XAI Failure
-            if tool_id or intent:
-                logger.warning(f"[XAI_TRACE] TIMEOUT: {tool_id} | Intent: {intent}")
+    def _GetCommand(
+        self,
+        Func: Callable[..., Any],
+        RequestId: str,
+        RequestDigest: str,
+        Args: Tuple[Any, ...],
+        Kwargs: Dict[str, Any],
+        ToolId: Optional[str],
+        Intent: Optional[str],
+    ) -> Tuple[MCPCommand, bool]:
+        """Get an identical request or create a new ledger entry atomically."""
+        with self._ledger_lock:
+            self._PruneLedger()
+            Existing = self._request_ledger.get(RequestId)
+            if Existing is not None:
+                self._request_ledger.move_to_end(RequestId)
+                if Existing.RequestDigest != RequestDigest:
+                    raise CommandLifecycleError(
+                        "REQUEST_ID_CONFLICT",
+                        "Request ID was already used for different command content",
+                        RequestId,
+                        Existing.status,
+                        False,
+                    )
+                return Existing, False
 
-            raise TimeoutError(f"Execution timed out after {timeout}s")
+            self._MakeLedgerSpace()
+            Command = MCPCommand(
+                id=RequestId,
+                func=Func,
+                args=Args,
+                kwargs=Kwargs,
+                tool_id=ToolId,
+                intent=Intent,
+                RequestDigest=RequestDigest,
+            )
+            Command.ResultPolicy = self._ReserveResult
+            self._request_ledger[RequestId] = Command
+            self._active_tasks[RequestId] = Command
+            return Command, True
 
-        if cmd.status == ExecutionStatus.FAILED:
-            if cmd.error:
-                # Log XAI Error
-                if tool_id or intent:
-                    logger.error(f"[XAI_TRACE] ERROR: {tool_id} | Intent: {intent} | {cmd.error}")
-                raise cmd.error
-            raise RuntimeError("Execution failed without error details")
+    def _ResolveCommand(self, Command: MCPCommand, IsDuplicate: bool = False) -> Any:
+        """Return a stored result or raise a structured lifecycle outcome."""
+        with Command.StateLock:
+            State = Command.status
+            Result = Command.result
+            Error = Command.error
 
-        # Log XAI Success
-        if tool_id or intent:
-            # In production, this would go to a structured log
-            # print(f"[XAI_TRACE] SUCCESS: {tool_id} | Intent: {intent} | {cmd.duration_ms:.2f}ms")
-            pass
+        if State in SUCCESS_STATUSES:
+            return Result
+        if State in FAILED_STATUSES:
+            if Error is not None:
+                raise Error
+            raise CommandLifecycleError(
+                "EXECUTION_ERROR",
+                "Execution failed without error details",
+                Command.id,
+                State,
+                False,
+            )
+        if State in RESULT_DROPPED_STATUSES:
+            raise CommandLifecycleError(
+                "RESULT_NOT_RETAINED",
+                "Command completed, but its result exceeded the reconciliation ledger limits",
+                Command.id,
+                State,
+                False,
+            )
+        if State == ExecutionStatus.TIMED_OUT_PENDING:
+            raise CommandTimeoutError(
+                "COMMAND_TIMED_OUT_PENDING",
+                "Command timed out while pending and will not execute",
+                Command.id,
+                State,
+                True,
+            )
+        if State == ExecutionStatus.RUNNING_AFTER_TIMEOUT:
+            raise CommandTimeoutError(
+                "REQUEST_INDETERMINATE",
+                "Command was running at timeout; reconcile by request ID before retrying",
+                Command.id,
+                State,
+                False,
+            )
+        if State == ExecutionStatus.CANCELLED:
+            raise CommandLifecycleError(
+                "REQUEST_CANCELLED",
+                "Command was cancelled before execution",
+                Command.id,
+                State,
+                True,
+            )
 
-        return cmd.result
+        Message = (
+            "Identical request is already in progress"
+            if IsDuplicate
+            else "Command did not reach a terminal state"
+        )
+        raise CommandLifecycleError(
+            "REQUEST_IN_PROGRESS",
+            Message,
+            Command.id,
+            State,
+            False,
+        )
+
+    def GetRequestStatus(
+        self, RequestId: str, IncludeResult: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        """Get a retained request state without crossing Blender's main thread."""
+        with self._ledger_lock:
+            self._PruneLedger()
+            Command = self._request_ledger.get(RequestId)
+            if Command is None:
+                return None
+            self._request_ledger.move_to_end(RequestId)
+        return Command.Snapshot(IncludeResult=IncludeResult)
+
+    def CancelRequest(self, RequestId: str) -> Optional[Dict[str, Any]]:
+        """Tombstone a retained pending request; running work is not misreported cancelled."""
+        with self._ledger_lock:
+            Command = self._request_ledger.get(RequestId)
+        if Command is None:
+            return None
+        Cancelled = Command.Cancel()
+        if Cancelled:
+            with self._ledger_lock:
+                self._active_tasks.pop(RequestId, None)
+        Snapshot = Command.Snapshot()
+        Snapshot["cancelled"] = Cancelled
+        return Snapshot
+
+    def Shutdown(self) -> None:
+        """Tombstone queued work and unregister the persistent Blender timer."""
+        self._stop_monitor.set()
+        while True:
+            try:
+                Command = self._task_queue.get_nowait()
+            except queue.Empty:
+                break
+            Command.Cancel()
+            with self._ledger_lock:
+                self._active_tasks.pop(Command.id, None)
+
+        if BPY_AVAILABLE and self._timer_registered:
+            try:
+                if bpy.app.timers.is_registered(self._process_queue):
+                    bpy.app.timers.unregister(self._process_queue)
+            except Exception as Error:
+                logger.error(
+                    "[BlenderMCP:CommandQueue] Timer shutdown failed "
+                    f"error_type={type(Error).__name__}"
+                )
+            finally:
+                self._timer_registered = False
+
+    def _PruneLedger(self) -> None:
+        """Expire old terminal entries while retaining every active request."""
+        Now = time.time()
+        Expired = []
+        for RequestId, Command in self._request_ledger.items():
+            with Command.StateLock:
+                IsExpired = (
+                    Command.status in TERMINAL_STATUSES
+                    and Command.end_time is not None
+                    and Now - Command.end_time >= self._LedgerRetentionSeconds
+                )
+            if IsExpired:
+                Expired.append(RequestId)
+        for RequestId in Expired:
+            self._RemoveLedgerEntry(RequestId)
+
+    def _MakeLedgerSpace(self) -> None:
+        """Evict the oldest terminal entry, never active work, at the hard limit."""
+        if len(self._request_ledger) >= self._MaxLedgerEntries:
+            raise CommandLifecycleError(
+                "COMMAND_LEDGER_FULL",
+                "Command ledger is at capacity within its reconciliation window",
+                "unassigned",
+                ExecutionStatus.PENDING,
+                True,
+            )
+
+    def _RemoveLedgerEntry(self, RequestId: str) -> None:
+        """Remove one expired entry and release its accounted retained-result bytes."""
+        Command = self._request_ledger.pop(RequestId, None)
+        if Command is not None:
+            self._LedgerResultBytes = max(
+                0,
+                self._LedgerResultBytes - Command.ResultByteSize,
+            )
+
+    def _ReserveResult(self, Result: Any) -> Tuple[bool, int, Optional[str]]:
+        """Bound retained result memory before publishing a terminal success state."""
+        try:
+            ResultBytes = len(
+                json.dumps(
+                    Result,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            return False, 0, "not_json_serializable"
+
+        if ResultBytes > self._MaxRetainedResultBytes:
+            return False, 0, "per_result_limit"
+        with self._ledger_lock:
+            if self._LedgerResultBytes + ResultBytes > self._MaxLedgerResultBytes:
+                return False, 0, "ledger_byte_limit"
+            self._LedgerResultBytes += ResultBytes
+        return True, ResultBytes, None
 
     def execute_batch(
         self, operations: List[Tuple[Any, ...]], timeout: float = 60.0, stop_on_error: bool = True
@@ -377,32 +782,50 @@ class ThreadSafety:
             List of results
         """
         results: List[Any] = []
-        errors: List[Optional[Exception]] = []
 
-        # Create all tasks
+        if is_main_thread():
+            for op in operations:
+                func, args, kwargs = self._ParseBatchOperation(op)
+                try:
+                    results.append(func(*args, **kwargs))
+                except Exception:
+                    results.append(None)
+                    if stop_on_error:
+                        break
+            return results
+
+        if not self._ensure_timer():
+            raise RuntimeError("Blender main-thread scheduling is unavailable")
+
+        ParsedOperations = [self._ParseBatchOperation(Operation) for Operation in operations]
         cmds: List[MCPCommand] = []
-        for op in operations:
-            func: Callable[..., Any]
-            args: Tuple[Any, ...]
-            kwargs: Dict[str, Any]
+        with self._ledger_lock:
+            self._PruneLedger()
+            if len(self._request_ledger) + len(ParsedOperations) > self._MaxLedgerEntries:
+                raise CommandLifecycleError(
+                    "COMMAND_LEDGER_FULL",
+                    "Batch does not fit within the command reconciliation window",
+                    "unassigned",
+                    ExecutionStatus.PENDING,
+                    True,
+                )
+            for func, args, kwargs in ParsedOperations:
+                RequestId = str(uuid.uuid4())
+                cmd = MCPCommand(
+                    id=RequestId,
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    intent="batch_execution",
+                    RequestDigest=f"batch:{RequestId}",
+                    ResultPolicy=self._ReserveResult,
+                )
+                self._request_ledger[RequestId] = cmd
+                self._active_tasks[RequestId] = cmd
+                cmds.append(cmd)
 
-            if len(op) == 2:
-                func, args = op
-                kwargs = {}
-            elif len(op) == 3:
-                func, args, kwargs = op
-            else:
-                raise ValueError(f"Invalid operation format: {op}")
-
-            cmd = MCPCommand(
-                id=str(uuid.uuid4()), func=func, args=args, kwargs=kwargs, intent="batch_execution"
-            )
-            cmds.append(cmd)
-            self._active_tasks[cmd.id] = cmd
+        for cmd in cmds:
             self._task_queue.put(cmd)
-
-        # Ensure timer
-        self._ensure_timer()
 
         # Wait for all with timeout
         start = time.time()
@@ -410,40 +833,70 @@ class ThreadSafety:
 
         for cmd in cmds:
             if remaining_timeout <= 0:
-                errors.append(TimeoutError("Batch timeout"))
+                cmd.MarkTimedOut()
                 results.append(None)
                 continue
 
             if not cmd.event.wait(timeout=remaining_timeout):
-                errors.append(TimeoutError(f"Command {cmd.id} timeout"))
+                cmd.MarkTimedOut()
                 results.append(None)
                 if stop_on_error:
+                    self._CancelPendingBatch(cmds, cmd)
                     break
             else:
-                if cmd.status == ExecutionStatus.FAILED:
-                    errors.append(cmd.error)
+                if cmd.status in FAILED_STATUSES:
                     results.append(None)
                     if stop_on_error:
+                        self._CancelPendingBatch(cmds, cmd)
                         break
-                else:
+                elif cmd.status in SUCCESS_STATUSES:
                     results.append(cmd.result)
-                    errors.append(None)
+                else:
+                    results.append(None)
 
             remaining_timeout = timeout - (time.time() - start)
 
-        # Cleanup
-        for cmd in cmds:
-            self._active_tasks.pop(cmd.id, None)
-
         return results
+
+    @staticmethod
+    def _ParseBatchOperation(
+        Operation: Tuple[Any, ...],
+    ) -> Tuple[Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]:
+        """Validate one legacy batch tuple without changing its public format."""
+        if len(Operation) == 2:
+            Func, Args = Operation
+            Kwargs: Dict[str, Any] = {}
+        elif len(Operation) == 3:
+            Func, Args, Kwargs = Operation
+        else:
+            raise ValueError(f"Invalid operation format: {Operation}")
+        return Func, Args, Kwargs
+
+    @staticmethod
+    def _CancelPendingBatch(Commands: List[MCPCommand], Current: MCPCommand) -> None:
+        """Tombstone unclaimed siblings after stop-on-error."""
+        SeenCurrent = False
+        for Command in Commands:
+            if Command is Current:
+                SeenCurrent = True
+                continue
+            if SeenCurrent:
+                Command.Cancel()
 
     def get_stats(self) -> Dict[str, Any]:
         """Get execution statistics."""
-        return {
-            **self._stats,
-            "queue_size": self._task_queue.qsize(),
-            "active_tasks": len(self._active_tasks),
-        }
+        with self._ledger_lock:
+            self._PruneLedger()
+            return {
+                **self._stats,
+                "queue_size": self._task_queue.qsize(),
+                "active_tasks": len(self._active_tasks),
+                "retained_requests": len(self._request_ledger),
+                "ledger_capacity": self._MaxLedgerEntries,
+                "ledger_retention_seconds": self._LedgerRetentionSeconds,
+                "retained_result_bytes": self._LedgerResultBytes,
+                "ledger_result_byte_capacity": self._MaxLedgerResultBytes,
+            }
 
 
 # =============================================================================
@@ -665,6 +1118,8 @@ __all__ = [
     "ThreadSafety",
     "MCPCommand",
     "ExecutionStatus",
+    "CommandLifecycleError",
+    "CommandTimeoutError",
     "execute_on_main_thread",
     "is_main_thread",
     "thread_safe",

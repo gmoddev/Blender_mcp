@@ -484,12 +484,16 @@ class BlenderMCPServer:
 
             # Check for error dict
             if isinstance(result, dict) and "error" in result:
+                ErrorPayload = {
+                    "code": result.get("code", "BLENDER_EXECUTION_ERROR"),
+                    "message": str(result.get("error", "Command failed")),
+                }
+                for Field in ("command_state", "retry_safe", "terminal"):
+                    if Field in result:
+                        ErrorPayload[Field] = result[Field]
                 return {
                     "status": "error",
-                    "error": {
-                        "code": result.get("code", "BLENDER_EXECUTION_ERROR"),
-                        "message": str(result.get("error", "Command failed")),
-                    },
+                    "error": ErrorPayload,
                     "_meta": result.get("_meta", {}),
                 }
 
@@ -892,7 +896,7 @@ def unregister():
 
             ts = ThreadSafety._instance
             if ts is not None:
-                ts._stop_monitor.set()
+                ts.Shutdown()
             # Remove MCP depsgraph hook
             hooks = bpy.app.handlers.depsgraph_update_post
             hooks[:] = [h for h in hooks if getattr(h, "__name__", "") != "_mcp_depsgraph_hook"]

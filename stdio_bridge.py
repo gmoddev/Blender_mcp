@@ -401,11 +401,18 @@ class MCPBridge:
                     ErrorMessage = ErrorValue.get("message", "Unknown error")
                 else:
                     ErrorMessage = ErrorValue
+                ErrorDetails = {
+                    "error": ErrorValue,
+                    "_meta": blender_resp.get("_meta", {}),
+                }
                 response["result"] = {
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Error: {ErrorMessage}",
+                            "text": (
+                                f"Error: {ErrorMessage}\n"
+                                f"{json.dumps(ErrorDetails, indent=2, sort_keys=True)}"
+                            ),
                         }
                     ],
                     "isError": True,

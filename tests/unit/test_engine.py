@@ -138,6 +138,45 @@ def test_validation_missing_param(mock_bridge):
     assert "speed" not in ValidationText
 
 
+def test_bridge_preserves_lifecycle_error_details(mock_bridge):
+    mock_bridge._schemas_loaded = True
+    mock_bridge._tool_schemas = {
+        "dummy_tool": {
+            "type": "object",
+            "properties": {"action": {"type": "string"}},
+            "required": ["action"],
+        }
+    }
+    mock_bridge.send_to_blender.return_value = {
+        "status": "error",
+        "error": {
+            "code": "REQUEST_INDETERMINATE",
+            "message": "Reconcile before retry",
+            "command_state": "running_after_timeout",
+            "retry_safe": False,
+            "terminal": False,
+        },
+        "_meta": {
+            "request_id": "bridge-lifecycle",
+            "command_state": "running_after_timeout",
+        },
+    }
+    Request = {
+        "jsonrpc": "2.0",
+        "id": "bridge-lifecycle",
+        "method": "tools/call",
+        "params": {"name": "dummy_tool", "arguments": {"action": "DO"}},
+    }
+
+    Response = mock_bridge.handle_mcp_request(Request)
+    ErrorText = Response["result"]["content"][0]["text"]
+
+    assert Response["result"]["isError"] is True
+    assert "REQUEST_INDETERMINATE" in ErrorText
+    assert "running_after_timeout" in ErrorText
+    assert "bridge-lifecycle" in ErrorText
+
+
 # =============================================================================
 # execute_blender_code blocking pattern tests (no bpy needed — pure regex scan)
 # =============================================================================

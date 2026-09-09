@@ -72,8 +72,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   classified `MUTATE`. The action audit will restore explicitly proven reads.
 - Existing consumers that call `recv_message()` must handle typed malformed/truncated/oversize
   errors rather than treating them as clean EOF.
-- A bridge timeout is now visibly indeterminate and never automatically replayed. Until Foundation
-  0D, there is no request-status query or result ledger.
+- A bridge timeout is visibly indeterminate and never automatically replayed. Foundation 0D adds a
+  bounded, in-process request ledger and a reconciliation handler that bypasses the Blender timer.
+  It does not survive Blender restart and does not cover direct provider timer callbacks.
 - Provider credentials remain Scene properties and existing file/network handlers remain outside a
   central authority boundary. These prevent valuable-asset readiness.
 

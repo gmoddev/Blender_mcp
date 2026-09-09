@@ -47,6 +47,27 @@ The first slice changes these boundaries:
 This slice intentionally does not modify the main-thread queue state machine, filesystem sinks,
 external providers, provider credentials, archives, or selectors. Their findings remain open.
 
+## Second Implementation Slice: Foundation 0D
+
+The command lifecycle slice changes these boundaries:
+
+- `blender_mcp/core/thread_safety.py`: synchronized monotonic states, timeout/cancel tombstones,
+  running-after-timeout retention, duplicate detection, bounded result ledger, batch cleanup, and
+  add-on shutdown cancellation.
+- `blender_mcp/dispatcher.py`: stable wire request IDs and canonical command digests enter the queue;
+  caller wait budgets are finite and bounded; lifecycle outcomes remain structured.
+- `blender_mcp/handlers/manage_command_lifecycle.py`: status and pending-cancel reconciliation run
+  without waiting behind Blender's main-thread queue.
+- `stdio_bridge.py` and the add-on response boundary: lifecycle code, request ID, state, terminal,
+  and retry-safety metadata survive response shaping.
+- `blender_mcp/core/headless_mode.py`: headless render execution uses the shared queue instead of a
+  second busy-waiting timer path.
+
+This slice is unit-verified but still requires live Blender queue congestion, reconnect,
+shutdown/reload, and socket-fault validation. Its ledger is process-local and bounded; an evicted or
+restart-lost ID is unknown, never proof that retry is safe. Direct provider timer callbacks remain
+outside this lifecycle and require separate job identity.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

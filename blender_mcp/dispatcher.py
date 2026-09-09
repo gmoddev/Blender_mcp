@@ -11,9 +11,12 @@ Central command router with:
 """
 
 import importlib
-import sys
+import hashlib
 import inspect
+import json
+import math
 import pkgutil
+import sys
 import textwrap
 import time
 import traceback
@@ -24,7 +27,13 @@ from .core.security import Capability, SecurityManager
 from .core.parameter_validator import validate_params_schema
 
 # V1.0.0: ResponseBuilder + Semantic Memory + Intent-Based Animation
-from .core.thread_safety import ThreadSafety, execute_on_main_thread, is_main_thread
+from .core.thread_safety import (
+    CommandLifecycleError,
+    ExecutionStatus,
+    TERMINAL_STATUSES,
+    ThreadSafety,
+    is_main_thread,
+)
 from .core.logging_config import MCPLogger, set_request_context, clear_request_context
 
 from .core.types import HandlerProtocol, HandlerMetadata
@@ -37,6 +46,9 @@ LOAD_ERRORS: List[str] = []
 # Initialize logger
 logger = MCPLogger()
 
+MIN_DISPATCH_TIMEOUT_SECONDS = 0.1
+MAX_DISPATCH_TIMEOUT_SECONDS = 7200.0
+
 
 def register_handler(
     command_name: str,
@@ -46,6 +58,7 @@ def register_handler(
     description: Optional[str] = None,
     priority: int = 100,
     capabilities: Optional[Dict[str, List[str]]] = None,
+    requires_main_thread: bool = True,
 ) -> Callable[[Callable[..., Any]], HandlerProtocol]:
     """
     Decorator to register a function as a handler for a specific command.
@@ -108,6 +121,7 @@ def register_handler(
             "category": category,
             "priority": priority,
             "capabilities": ResolvedCapabilities,
+            "requires_main_thread": requires_main_thread,
         }
 
         # Attach metadata to function for introspection.
@@ -117,6 +131,7 @@ def register_handler(
         setattr(func, "_handler_schema", schema or {})
         setattr(func, "_handler_category", category)
         setattr(func, "_handler_capabilities", ResolvedCapabilities)
+        setattr(func, "_handler_requires_main_thread", requires_main_thread)
 
         logger.debug(
             f"Registered handler: {command_name}",
@@ -571,6 +586,7 @@ def dispatch_command(
     actions = metadata.get("actions", [])
     schema = metadata.get("schema", {})
     ActionCapabilities = metadata.get("capabilities", {}).get(action)
+    RequiresMainThread = metadata.get("requires_main_thread", True)
 
     # Validate action if specified
     if actions and action not in actions:
@@ -623,23 +639,64 @@ def dispatch_command(
                 return handler_func(action=action_param, **call_params)
 
         # Route to main thread if needed
-        if use_thread_safety and not is_main_thread():
+        CommandState = ExecutionStatus.COMPLETED.value
+        if use_thread_safety and RequiresMainThread and not is_main_thread():
             try:
                 # Use caller-supplied timeout_seconds (e.g. for RENDER_FRAME: 300s).
                 # Default 300s matches RenderTimeout.FRAME_DEFAULT so renders never time
                 # out at the dispatcher level before the handler's own timeout fires.
-                _dispatch_timeout = float(params.get("timeout_seconds", 300.0))
-                result = execute_on_main_thread(execute_handler, timeout=_dispatch_timeout)
-            except TimeoutError as e:
+                DispatchTimeout = _GetDispatchTimeout(params)
+                RequestDigest = _BuildRequestDigest(tool_name, params)
+                result = ThreadSafety().ExecuteRequest(
+                    execute_handler,
+                    RequestId=request_id,
+                    RequestDigest=RequestDigest,
+                    Timeout=DispatchTimeout,
+                    ToolId=LogToolName,
+                    Intent=LogActionName,
+                )
+                RequestState = ThreadSafety().GetRequestStatus(request_id, IncludeResult=False)
+                if RequestState is not None:
+                    CommandState = str(RequestState["state"])
+            except CommandLifecycleError as Error:
                 error_result = {
-                    "error": f"Execution timeout: {str(e)}",
-                    "code": "TIMEOUT_ERROR",
-                    "suggestion": "Try with simpler parameters or split into smaller operations",
+                    "error": Error.PublicMessage,
+                    "code": Error.Code,
+                    "command_state": Error.Status.value,
+                    "retry_safe": Error.RetrySafe,
+                    "terminal": Error.Status in TERMINAL_STATUSES,
+                    "suggestion": "Query manage_command_lifecycle before retrying this request",
+                    "_meta": {
+                        "request_id": request_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "command_state": Error.Status.value,
+                        "retry_safe": Error.RetrySafe,
+                    },
                 }
-                _log_execution(tool_name, action, params, error_result, start_time, e)
+                _log_execution(tool_name, action, params, error_result, start_time, Error)
                 return error_result
             except Exception as e:
-                error_result = {"error": f"Execution failed: {str(e)}", "code": "EXECUTION_ERROR"}
+                RequestState = ThreadSafety().GetRequestStatus(request_id, IncludeResult=False)
+                error_result = {
+                    "error": f"Execution failed: {str(e)}",
+                    "code": "EXECUTION_ERROR",
+                }
+                if RequestState is not None:
+                    error_result.update(
+                        {
+                            "command_state": RequestState["state"],
+                            "retry_safe": bool(RequestState["retry_safe"]),
+                            "terminal": bool(RequestState["terminal"]),
+                            "_meta": {
+                                "request_id": request_id,
+                                "tool": tool_name,
+                                "action": action,
+                                "command_state": RequestState["state"],
+                                "retry_safe": bool(RequestState["retry_safe"]),
+                            },
+                        }
+                    )
                 _log_execution(tool_name, action, params, error_result, start_time, e)
                 return error_result
         else:
@@ -659,6 +716,7 @@ def dispatch_command(
             "request_id": request_id,
             "tool": tool_name,
             "action": action,
+            "command_state": CommandState,
         }
 
         _log_execution(tool_name, action, params, result, start_time, None)
@@ -687,6 +745,64 @@ def dispatch_command(
 
     finally:
         clear_request_context()
+
+
+def _GetDispatchTimeout(Params: Dict[str, Any]) -> float:
+    """Validate the caller-visible wait budget against server-owned bounds."""
+    RawTimeout = Params.get("timeout_seconds", 300.0)
+    if isinstance(RawTimeout, bool):
+        raise CommandLifecycleError(
+            "INVALID_TIMEOUT",
+            "timeout_seconds must be a finite number",
+            "unassigned",
+            ExecutionStatus.CANCELLED,
+            True,
+        )
+    try:
+        Timeout = float(RawTimeout)
+    except (TypeError, ValueError) as Error:
+        raise CommandLifecycleError(
+            "INVALID_TIMEOUT",
+            "timeout_seconds must be a finite number",
+            "unassigned",
+            ExecutionStatus.CANCELLED,
+            True,
+        ) from Error
+    if (
+        not math.isfinite(Timeout)
+        or Timeout < MIN_DISPATCH_TIMEOUT_SECONDS
+        or Timeout > MAX_DISPATCH_TIMEOUT_SECONDS
+    ):
+        raise CommandLifecycleError(
+            "INVALID_TIMEOUT",
+            f"timeout_seconds must be between {MIN_DISPATCH_TIMEOUT_SECONDS} and "
+            f"{MAX_DISPATCH_TIMEOUT_SECONDS}",
+            "unassigned",
+            ExecutionStatus.CANCELLED,
+            True,
+        )
+    return Timeout
+
+
+def _BuildRequestDigest(ToolName: str, Params: Dict[str, Any]) -> str:
+    """Hash the canonical command content without persisting sensitive parameters."""
+    try:
+        Canonical = json.dumps(
+            {"tool": ToolName, "params": Params},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as Error:
+        raise CommandLifecycleError(
+            "INVALID_REQUEST_CONTENT",
+            "Command content cannot be canonicalized",
+            "unassigned",
+            ExecutionStatus.CANCELLED,
+            True,
+        ) from Error
+    return hashlib.sha256(Canonical).hexdigest()
 
 
 def _log_execution(

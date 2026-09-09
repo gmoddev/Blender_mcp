@@ -257,18 +257,6 @@ def _handle_playback_start(**params: Any) -> Dict[str, Any]:
             data={"state": "playing"},
         )
     except Exception as e:
-        # If it times out but started playing, we can still report success in some cases,
-        # but for stability, we report the error if it's a real failure.
-        if "Timeout" in str(e):
-            # It's common for modal ops to timeout on the bridge side even if they start
-            return ResponseBuilder.success(
-                handler="manage_scene",
-                action=SceneAction.PLAYBACK_START.value,
-                data={
-                    "state": "playing_assumed",
-                    "note": "Started but modal op blocked thread return",
-                },
-            )
         return ResponseBuilder.error(
             handler="manage_scene",
             action=SceneAction.PLAYBACK_START.value,
@@ -318,9 +306,9 @@ def _handle_inspect_object(**params: Any) -> Dict[str, Any]:
             "name": obj.name,
             "type": obj.type,
             "location": list(cast(Iterable[float], obj.location)) if obj.location else [],
-            "rotation": list(cast(Iterable[float], obj.rotation_euler))
-            if obj.rotation_euler
-            else [],
+            "rotation": (
+                list(cast(Iterable[float], obj.rotation_euler)) if obj.rotation_euler else []
+            ),
             "scale": list(cast(Iterable[float], obj.scale)) if obj.scale else [],
             "parent": obj.parent.name if obj.parent else None,
             "modifiers": [m.name for m in obj.modifiers],

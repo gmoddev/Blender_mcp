@@ -88,8 +88,11 @@ correlation, active-client limits, metadata-only logging on the primary request
 path, and initial capability enforcement. These controls still require live
 Blender validation. The action-level capability audit is incomplete.
 
-Known, unremediated gaps remain in timeout cancellation/idempotency,
-filesystem authorization, external integration isolation, provider credential
+The shared dispatcher queue now has timeout/cancellation tombstones, duplicate
+detection, bounded in-process reconciliation, and truthful running-after-timeout
+states. These controls still require live Blender and reconnect/fault validation,
+and direct provider timer callbacks remain outside the ledger. Other known,
+unremediated gaps remain in filesystem authorization, external integration isolation, provider credential
 storage, download/archive limits, selector complexity, checkpoint recovery, and
 the remaining logging surface. These are scan targets, not accepted risks.
 

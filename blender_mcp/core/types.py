@@ -39,6 +39,7 @@ class HandlerMetadata(TypedDict):
     category: str
     priority: int
     capabilities: Dict[str, List[str]]
+    requires_main_thread: bool
 
 
 # ============================================================================

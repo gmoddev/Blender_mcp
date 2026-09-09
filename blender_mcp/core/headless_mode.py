@@ -27,6 +27,7 @@ except ImportError:
     bpy: Any = None  # type: ignore[no-redef]
 from .error_protocol import ErrorProtocol, create_error
 from .logging_config import get_logger
+from .thread_safety import execute_on_main_thread
 from .versioning import BlenderCompatibility
 
 logger = get_logger()
@@ -244,24 +245,7 @@ class HeadlessModeManager:
                 and hasattr(func, "__module__")
                 and "bpy.ops" in str(func)
             ):
-                result_holder = {}
-
-                def callback(result: Any) -> None:
-                    result_holder["result"] = result
-
-                HeadlessModeManager.queue_execution(func, *args, callback=callback, **kwargs)
-
-                # Wait for execution (blocking in headless)
-                timeout = 30.0
-                start = time.time()
-                while "result" not in result_holder:
-                    if time.time() - start > timeout:
-                        return create_error(
-                            ErrorProtocol.TIMEOUT_ERROR, custom_message="Execution timeout"
-                        )
-                    time.sleep(0.01)
-
-                queued_result = result_holder.get("result")
+                queued_result = execute_on_main_thread(func, *args, timeout=30.0, **kwargs)
                 if isinstance(queued_result, dict):
                     return queued_result
                 return {"success": True, "result": queued_result}
