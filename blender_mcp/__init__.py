@@ -4,11 +4,11 @@ bl_info = {
     "version": (1, 0, 0),
     "blender": (5, 0, 0),  # High Mode: Blender 5.0+ only, no backward compatibility
     "location": "View3D > Sidebar > MCP",
-    "description": "Blender Model Context Protocol (MCP) Server - High Mode Vision Edition (v1.0.0)",
+    "description": "Generic local Blender Model Context Protocol server (v1.0.0)",
     "category": "Development",
     "support": "COMMUNITY",
-    "doc_url": "https://github.com/glonorce/blender-mcp",
-    "tracker_url": "https://github.com/glonorce/blender-mcp/issues",
+    "doc_url": "https://github.com/gmoddev/Blender_mcp",
+    "tracker_url": "https://github.com/gmoddev/Blender_mcp/issues",
 }
 
 
@@ -81,17 +81,20 @@ if not hasattr(bpy, "is_mock"):
     setattr(bpy, "is_mock", False)
 
 import importlib
+import ipaddress
 import json
 
 # STAFF+ DEBUG LOGGING
 import logging
 import os
+import secrets
 import socket
 import sys
 import tempfile
 import threading
 import time
 import traceback
+import uuid
 
 SERVER_LOG_FILE = os.path.join(tempfile.gettempdir(), "blender_server_debug.log")
 server_logger = logging.getLogger("blender_mcp_server")
@@ -160,37 +163,107 @@ except ImportError:
 
 
 class BlenderMCPServer:
-    def __init__(self, host="localhost", port=9879):
+    def __init__(
+        self,
+        host="localhost",
+        port=9879,
+        auth_token=None,
+        max_active_clients=4,
+        handshake_timeout=5.0,
+        body_timeout=30.0,
+        idle_timeout=300.0,
+    ):
         self.host = host
         self.port = port
         self.running = False
         self.socket = None
         self.server_thread = None
+        self.AuthToken = auth_token
+        self.InstanceId = str(uuid.uuid4())
+        self.AuthEpoch = 0
+        self.MaxActiveClients = max(1, int(max_active_clients))
+        self.HandshakeTimeout = max(1.0, float(handshake_timeout))
+        self.BodyTimeout = max(1.0, float(body_timeout))
+        self.IdleTimeout = max(1.0, float(idle_timeout))
+        self._ClientSlots = threading.BoundedSemaphore(self.MaxActiveClients)
+        self._Clients = set()
+        self._ClientsLock = threading.Lock()
 
     def start(self):
         if self.running:
-            print("[MCP] Server is already running")
-            return
-
-        self.running = True
+            log_debug("[BlenderMCP:Server] Start ignored; already running")
+            return True
 
         try:
+            from .core.session import ValidateAuthToken
+
+            self.AuthToken = ValidateAuthToken(self.GetAuthToken())
+            if not self.IsLoopbackHost(self.host):
+                raise ValueError("Remote binding is disabled; use a loopback host")
+            self.InstanceId = str(uuid.uuid4())
+            self.AuthEpoch += 1
+
             # Create socket
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # Bind to localhost for security
             self.socket.bind((self.host, self.port))
-            self.socket.listen(1)
+            self.port = int(self.socket.getsockname()[1])
+            self.socket.listen(self.MaxActiveClients)
+            self.running = True
 
             # Start server thread
-            self.server_thread = threading.Thread(target=self._server_loop)
+            self.server_thread = threading.Thread(
+                target=self._server_loop,
+                name="BlenderMCP-Listener",
+            )
             self.server_thread.daemon = True
             self.server_thread.start()
 
-            print(f"[MCP] BlenderMCP server started on {self.host}:{self.port}")
-        except Exception as e:
-            print(f"[MCP] Failed to start server: {str(e)}")
+            log_debug(f"[BlenderMCP:Server] Started on loopback port {self.port}")
+            return True
+        except Exception:
+            log_debug("[BlenderMCP:Server] Start failed; inspect configuration")
             self.stop()
+            return False
+
+    def GetAuthToken(self):
+        """Resolve a user-scoped credential without consulting Scene data."""
+        if isinstance(self.AuthToken, str) and self.AuthToken.strip():
+            return self.AuthToken.strip()
+
+        try:
+            Addon: Any = bpy.context.preferences.addons.get(__package__)
+            if Addon:
+                PreferenceToken = str(getattr(Addon.preferences, "auth_token", "") or "").strip()
+                if PreferenceToken:
+                    return PreferenceToken
+        except (AttributeError, KeyError, TypeError):
+            pass
+
+        EnvironmentToken = os.environ.get("BLENDER_MCP_AUTH_TOKEN", "").strip()
+        if EnvironmentToken:
+            return EnvironmentToken
+        return ""
+
+    @staticmethod
+    def IsLoopbackHost(Host):
+        """Accept literal loopback addresses and localhost only."""
+        if Host == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(Host).is_loopback
+        except ValueError:
+            return False
+
+    def RotateAuthToken(self, AuthToken):
+        """Revoke all current sessions and install a new credential."""
+        from .core.session import ValidateAuthToken
+
+        self.AuthToken = ValidateAuthToken(AuthToken)
+        self.AuthEpoch += 1
+        self.InstanceId = str(uuid.uuid4())
+        self._CloseClients()
+        log_debug("[BlenderMCP:Auth] Credential rotated; active sessions revoked")
 
     def stop(self):
         self.running = False
@@ -203,6 +276,8 @@ class BlenderMCPServer:
                 pass
             self.socket = None
 
+        self._CloseClients()
+
         # Wait for thread to finish
         if self.server_thread:
             try:
@@ -212,116 +287,185 @@ class BlenderMCPServer:
                 pass
             self.server_thread = None
 
-        print("[MCP] BlenderMCP server stopped")
+        log_debug("[BlenderMCP:Server] Stopped")
+
+    def _CloseClients(self):
+        with self._ClientsLock:
+            Clients = list(self._Clients)
+        for Client in Clients:
+            try:
+                Client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                Client.close()
+            except OSError:
+                pass
 
     def _server_loop(self):
-        """Main server loop in a separate thread"""
-        print("[MCP] Server thread started")
+        """Accept only a bounded number of loopback clients."""
+        log_debug("[BlenderMCP:Server] Listener thread started")
         if self.socket:
-            self.socket.settimeout(1.0)  # Timeout to allow for stopping
+            self.socket.settimeout(1.0)
 
         while self.running and self.socket:
             try:
-                # Accept new connection
-                try:
-                    client, address = self.socket.accept()
-                    # print(f"[MCP] Connected: {address}")
-
-                    # Handle client in a separate thread
-                    client_thread = threading.Thread(target=self._handle_client, args=(client,))
-                    client_thread.daemon = True
-                    client_thread.start()
-                except socket.timeout:
-                    # Just check running condition
+                Client, _Address = self.socket.accept()
+                if not self._ClientSlots.acquire(blocking=False):
+                    self._RejectClientLimit(Client)
                     continue
-                except Exception as e:
-                    print(f"[MCP] Error accepting connection: {str(e)}")
-                    time.sleep(0.5)
-            except Exception as e:
-                print(f"[MCP] Error in server loop: {str(e)}")
+                with self._ClientsLock:
+                    self._Clients.add(Client)
+                ClientThread = threading.Thread(
+                    target=self._HandleAcceptedClient,
+                    args=(Client,),
+                    name="BlenderMCP-Client",
+                    daemon=True,
+                )
+                ClientThread.start()
+            except socket.timeout:
+                continue
+            except OSError:
                 if not self.running:
                     break
-                time.sleep(0.5)
+                log_debug("[BlenderMCP:Server] Listener socket error")
+                time.sleep(0.25)
 
-        print("[MCP] Server thread stopped")
+        log_debug("[BlenderMCP:Server] Listener thread stopped")
+
+    def _RejectClientLimit(self, Client):
+        from .core import protocol
+        from .core.session import BuildErrorEnvelope
+
+        try:
+            protocol.send_message(
+                Client,
+                BuildErrorEnvelope("RESOURCE_LIMIT", "Active client limit reached"),
+            )
+        except (OSError, protocol.ProtocolError):
+            pass
+        finally:
+            try:
+                Client.close()
+            except OSError:
+                pass
+
+    def _HandleAcceptedClient(self, Client):
+        try:
+            self._handle_client(Client)
+        finally:
+            with self._ClientsLock:
+                self._Clients.discard(Client)
+            self._ClientSlots.release()
 
     def _handle_client(self, client):
-        """Handle connected client using Robust Protocol - Blender 5.0+ Fixed"""
-        # Ensure we can import the protocol module
+        """Authenticate a client before accepting any tool payload."""
+        from .core import protocol
+        from .core.session import (
+            BuildEnvelope,
+            BuildErrorEnvelope,
+            MessageType,
+            PREAUTH_MAX_FRAME_BYTES,
+            ServerSession,
+            SessionError,
+        )
+
+        Session = ServerSession(self.AuthToken, self.InstanceId, self.AuthEpoch)
+        log_debug(f"[BlenderMCP:Auth] Challenge issued session={Session.SessionId}")
         try:
-            from .core import protocol
-        except ImportError:
-            import blender_mcp.core.protocol as protocol
+            client.settimeout(self.BodyTimeout)
+            protocol.send_message(client, Session.BuildChallenge())
+            AuthEnvelope = protocol.recv_message(
+                client,
+                max_frame_bytes=PREAUTH_MAX_FRAME_BYTES,
+                header_timeout=self.HandshakeTimeout,
+                body_timeout=self.HandshakeTimeout,
+            )
+            if AuthEnvelope is None:
+                raise SessionError(
+                    "AUTH_REQUIRED",
+                    "Authentication is required",
+                    Session.RequestId,
+                    Session.SessionId,
+                )
+            protocol.send_message(client, Session.Authenticate(AuthEnvelope))
+            log_debug(f"[BlenderMCP:Auth] Authenticated session={Session.SessionId}")
 
-        client.settimeout(None)  # Blocking mode
-
-        log_debug(f"Client Connected: {client.getpeername()}")
-
-        try:
             while self.running:
-                # 1. Receive Message (Blocks until full frame arrives)
-                try:
-                    command = protocol.recv_message(client)
-                    if not command:
-                        log_debug("Client Disconnected (EOF)")
-                        break
-
-                    log_debug(f"Received Command: {str(command)[:100]}...")
-
-                    # 2. Execute command DIRECTLY (we're already in a thread,
-                    # execute_command handles thread safety internally)
-                    try:
-                        log_debug("Executing command...")
-                        response = self.execute_command(command)
-                        log_debug(f"Execution Done. Response: {str(response)[:100]}...")
-
-                        # 3. Send Response
-                        protocol.send_message(client, response)
-                        log_debug("Response SENT.")
-                    except Exception as e:
-                        log_debug(f"Error executing/sending: {str(e)}")
-                        log_debug(traceback.format_exc())
-                        # Try to send error frame
-                        try:
-                            protocol.send_message(
-                                client,
-                                {
-                                    "status": "error",
-                                    "message": f"Execution Error: {str(e)}",
-                                },
-                            )
-                        except:
-                            pass
-
-                except socket.timeout:
-                    continue
-                except Exception as e:
-                    log_debug(f"Transport Error: {e}")
-                    log_debug(traceback.format_exc())
+                Envelope = protocol.recv_message(
+                    client,
+                    header_timeout=self.IdleTimeout,
+                    body_timeout=self.BodyTimeout,
+                )
+                if Envelope is None:
                     break
-
-        except Exception as e:
-            log_debug(f"Error in client handler: {str(e)}")
-            log_debug(traceback.format_exc())
+                Command = Session.ValidateRequest(Envelope)
+                RequestId = Envelope["request_id"]
+                Command["request_id"] = RequestId
+                Params = Command.get("params", {})
+                if not isinstance(Params, dict):
+                    raise SessionError(
+                        "INVALID_REQUEST",
+                        "Command params must be an object",
+                        RequestId,
+                        Session.SessionId,
+                    )
+                RequestedTool = Command.get("tool")
+                ToolName = (
+                    RequestedTool
+                    if isinstance(RequestedTool, str)
+                    and RequestedTool in dispatcher.HANDLER_REGISTRY
+                    else "unknown"
+                )
+                RequestedAction = Params.get("action")
+                KnownActions = dispatcher.HANDLER_METADATA.get(ToolName, {}).get("actions", [])
+                ActionName = (
+                    RequestedAction
+                    if isinstance(RequestedAction, str) and RequestedAction in KnownActions
+                    else "unknown"
+                )
+                log_debug(
+                    f"[BlenderMCP:Server] Dispatch request={RequestId} "
+                    f"tool={ToolName} action={ActionName}"
+                )
+                Response = self.execute_command(Command)
+                protocol.send_message(
+                    client,
+                    BuildEnvelope(MessageType.RESPONSE, RequestId, Session.SessionId, Response),
+                )
+        except (SessionError, protocol.ProtocolError) as Error:
+            log_debug(f"[BlenderMCP:Protocol] Rejected code={Error.Code}")
+            RequestId = getattr(Error, "RequestId", Session.RequestId)
+            SessionId = getattr(Error, "SessionId", Session.SessionId)
+            try:
+                protocol.send_message(
+                    client,
+                    BuildErrorEnvelope(Error.Code, Error.Message, RequestId, SessionId),
+                )
+            except (OSError, protocol.ProtocolError):
+                pass
+        except socket.timeout:
+            log_debug("[BlenderMCP:Protocol] Connection deadline exceeded")
+        except OSError:
+            log_debug("[BlenderMCP:Protocol] Connection closed")
         finally:
-            log_debug("Closing Client Connection")
+            Session.Close()
             try:
                 client.close()
-            except:
+            except OSError:
                 pass
 
     def execute_command(self, command):
         """Execute a command with detailed error handling"""
         try:
-            log_debug(f"execute_command started for: {command.get('tool', 'unknown')}")
             result = self._execute_command_internal(command)
-            log_debug("execute_command completed successfully")
             return result
-        except Exception as e:
-            error_msg = f"Command execution failed: {str(e)}"
-            log_debug(f"ERROR: {error_msg}")
-            log_debug(traceback.format_exc())
-            return {"status": "error", "message": error_msg}
+        except Exception:
+            log_debug("[BlenderMCP:Dispatcher] Command execution failed")
+            return {
+                "status": "error",
+                "error": {"code": "BLENDER_EXECUTION_ERROR", "message": "Command failed"},
+            }
 
     def _execute_command_internal(self, command):
         """Internal command execution using modular dispatch system"""
@@ -340,46 +484,55 @@ class BlenderMCPServer:
 
             # Check for error dict
             if isinstance(result, dict) and "error" in result:
-                # If unknown, try legacy fallback (only for telemetry)
-                if "unknown command" in str(result["error"]).lower():
-                    if cmd_type == "get_telemetry_consent":
-                        return {
-                            "status": "success",
-                            "result": self.get_telemetry_consent(),
-                        }
-
-            if isinstance(result, dict) and "error" in result:
-                return {"status": "error", "message": result["error"]}
+                return {
+                    "status": "error",
+                    "error": {
+                        "code": result.get("code", "BLENDER_EXECUTION_ERROR"),
+                        "message": str(result.get("error", "Command failed")),
+                    },
+                    "_meta": result.get("_meta", {}),
+                }
 
             return {"status": "success", "result": result}
 
-        except Exception as e:
-            print(f"[MCP] Modular handler error for {cmd_type}: {e}")
-            traceback.print_exc()
-            return {"status": "error", "message": str(e)}
+        except Exception:
+            log_debug("[BlenderMCP:Dispatcher] Modular handler failed")
+            return {
+                "status": "error",
+                "error": {"code": "BLENDER_EXECUTION_ERROR", "message": "Command failed"},
+            }
 
-    def get_telemetry_consent(self):
-        """Get the current telemetry consent status"""
-        try:
-            addon_prefs = bpy.context.preferences.addons.get(__package__)  # type: ignore[union-attr] # Use package name
-            if addon_prefs:
-                consent = cast(Any, addon_prefs).preferences.telemetry_consent
-            else:
-                consent = True
-        except (AttributeError, KeyError):
-            consent = True
-        return {"consent": consent}
+
+class BLENDERMCP_OT_RotateAuthToken(bpy.types.Operator):
+    bl_idname = "blendermcp.rotate_auth_token"
+    bl_label = "Generate New Authentication Credential"
+    bl_description = "Generate a new credential and revoke active MCP sessions"
+
+    def execute(self, context):
+        Addon = context.preferences.addons.get(__package__)
+        if not Addon:
+            log_debug("[BlenderMCP:Auth] Credential rotation failed; preferences unavailable")
+            return {"CANCELLED"}
+
+        NewToken = secrets.token_urlsafe(32)
+        Addon.preferences.auth_token = NewToken
+        Server = getattr(bpy.types, "blendermcp_server", None)
+        if Server:
+            Server.RotateAuthToken(NewToken)
+        log_debug("[BlenderMCP:Auth] New user-scoped credential generated")
+        return {"FINISHED"}
 
 
 class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__  # Use package name for preferences
 
-    telemetry_consent: bool = cast(
-        bool,
-        BoolProperty(
-            name="Allow Telemetry",
-            description="Allow collection of anonymized usage data",
-            default=True,
+    auth_token: str = cast(
+        str,
+        StringProperty(
+            name="Authentication Credential",
+            description="User-scoped MCP credential; copy it to BLENDER_MCP_AUTH_TOKEN",
+            default="",
+            subtype="PASSWORD",
         ),
     )
 
@@ -392,26 +545,31 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         ),
     )
 
+    raw_code_enabled: bool = cast(
+        bool,
+        BoolProperty(
+            name="Allow Raw Python",
+            description="Allow unrestricted Python only while Safe Mode is off",
+            default=False,
+        ),
+    )
+
     def draw(self, context):
         layout = self.layout
 
         # Security Section
         layout.label(text="Security:", icon="LOCKED")
         box = layout.box()
+        box.prop(self, "auth_token", text="Authentication Credential")
+        box.operator("blendermcp.rotate_auth_token", icon="FILE_REFRESH")
         box.prop(self, "safe_mode", text="Safe Mode (Disable Python Execution)")
+        box.prop(self, "raw_code_enabled", text="Allow Raw Python (High Risk)")
         if self.safe_mode:
-            box.label(text="Arbitrary code execution is BLOCKED.", icon="CHECKMARK")
+            box.label(text="Read-only audited actions are allowed.", icon="CHECKMARK")
         else:
-            box.label(
-                text="Arbitrary code execution is ALLOWED. Use with caution!",
-                icon="ERROR",
-            )
-
-        # Telemetry section
-        layout.label(text="Telemetry & Privacy:", icon="PREFERENCES")
-
-        box = layout.box()
-        box.prop(self, "telemetry_consent", text="Allow Telemetry")
+            box.label(text="Structured mutations are allowed.", icon="ERROR")
+        if self.raw_code_enabled and not self.safe_mode:
+            box.label(text="Unrestricted Python is ALLOWED.", icon="ERROR")
 
         # Terms link
         box.separator()
@@ -580,6 +738,7 @@ class BLENDERMCP_OT_DebugTools(bpy.types.Operator):
 
 
 classes = (
+    BLENDERMCP_OT_RotateAuthToken,
     BLENDERMCP_OT_StartServer,
     BLENDERMCP_OT_StopServer,
     BLENDERMCP_OT_OpenTerms,

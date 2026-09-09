@@ -75,7 +75,11 @@ def test_validation_success_path(mock_bridge):
 
     # Check the 2nd call arguments
     args, kwargs = mock_bridge.send_to_blender.call_args
-    assert args[0] == {"tool": "dummy_tool", "params": {"action": "START", "speed": 50}}
+    assert args[0] == {
+        "tool": "dummy_tool",
+        "params": {"action": "START", "speed": 50},
+        "request_id": "1",
+    }
 
 
 def test_validation_invalid_enum(mock_bridge):
@@ -102,8 +106,9 @@ def test_validation_invalid_enum(mock_bridge):
     assert mock_bridge.send_to_blender.call_count == 1
 
     assert response["result"]["isError"] is True
-    assert "Schema Validation Failed" in response["result"]["content"][0]["text"]
-    assert "PAUSE" in response["result"]["content"][0]["text"]
+    ValidationText = response["result"]["content"][0]["text"]
+    assert ValidationText == "Error: Schema validation failed."
+    assert "PAUSE" not in ValidationText
 
 
 def test_validation_missing_param(mock_bridge):
@@ -128,8 +133,9 @@ def test_validation_missing_param(mock_bridge):
     assert mock_bridge.send_to_blender.call_count == 1
 
     assert response["result"]["isError"] is True
-    assert "Schema Validation Failed" in response["result"]["content"][0]["text"]
-    assert "'speed' is a required property" in response["result"]["content"][0]["text"]
+    ValidationText = response["result"]["content"][0]["text"]
+    assert ValidationText == "Error: Schema validation failed."
+    assert "speed" not in ValidationText
 
 
 # =============================================================================

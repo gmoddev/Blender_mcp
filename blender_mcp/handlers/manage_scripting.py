@@ -23,6 +23,7 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
+from ..core.security import Capability
 from ..core.logging_config import get_logger
 from ..core.validation_utils import ValidationUtils
 
@@ -32,6 +33,11 @@ logger = get_logger()
 @register_handler(
     "manage_scripting",
     actions=[a.value for a in ScriptingAction],
+    capabilities={
+        ScriptingAction.CREATE_TEXT_BLOCK.value: [Capability.MUTATE.value],
+        ScriptingAction.EXECUTE_CODE.value: [Capability.EXECUTE_CODE.value],
+        ScriptingAction.EXECUTE_TEXT_BLOCK.value: [Capability.EXECUTE_CODE.value],
+    },
     category="general",
     schema={
         "type": "object",
@@ -173,6 +179,7 @@ _BLOCKING_RENDER_PATTERNS = [
 
 @register_handler(
     "execute_blender_code",
+    capabilities={"execute_blender_code": [Capability.EXECUTE_CODE.value]},
     priority=1,
     schema={
         "type": "object",
@@ -290,6 +297,7 @@ def execute_blender_code(**params):  # type: ignore[no-untyped-def]
 
 @register_handler(
     "execute_code",
+    capabilities={"execute_code": [Capability.EXECUTE_CODE.value]},
     priority=200,
     schema={
         "type": "object",

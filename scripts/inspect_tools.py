@@ -179,17 +179,14 @@ def main() -> None:
         # Tier section header
         if tname != current_tier:
             current_tier = tname
+            TierRange = {
+                "ESSENTIAL": "1-9",
+                "CORE": "10-49",
+                "STANDARD": "50-149",
+                "OPTIONAL": "150+",
+            }.get(tname, "?")
             print(f"\n{'━' * 90}")
-            print(
-                f"  {icon}  {tname} TIER  (priority {
-                    {
-                        'ESSENTIAL': '1-9',
-                        'CORE': '10-49',
-                        'STANDARD': '50-149',
-                        'OPTIONAL': '150+',
-                    }.get(tname, '?')
-                })"
-            )
+            print(f"  {icon}  {tname} TIER  (priority {TierRange})")
             print(f"{'━' * 90}")
 
         # Tool header

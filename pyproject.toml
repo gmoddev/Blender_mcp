@@ -1,15 +1,15 @@
 [project]
 name = "blender_mcp"
 version = "1.0.0"
-description = "Blender Model Context Protocol (MCP) Server - High Mode"
+description = "Generic Blender Model Context Protocol (MCP) server"
 requires-python = ">=3.10"
 readme = { text = "Blender Model Context Protocol (MCP) Server package.", content-type = "text/plain" }
 authors = [
   { name = "GÖKSEL ÖZKAN", email = "glonorce@github.com" },
 ]
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

@@ -1,10 +1,14 @@
 import sys
 import io
+import ipaddress
 import json
 import socket
 import logging
 import os
 import tempfile
+import threading
+import time
+import uuid
 import jsonschema
 from jsonschema.exceptions import ValidationError
 from typing import Any, cast, Dict, Optional
@@ -27,10 +31,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-logging.info("=== MCP BRIDGE STARTED (1.0.0 High Mode) ===")
-logging.info(f"Arguments: {sys.argv}")
-logging.info(f"CWD: {os.getcwd()}")
-logging.info(f"Python: {sys.executable}")
+logging.info("[BlenderMCP:Bridge] Started")
 
 # HARDENING: Ensure we can import the local package
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,10 +41,14 @@ if current_dir not in sys.path:
 
 
 class MCPBridge:
-    def __init__(self, host="localhost", port=9879):
+    def __init__(self, host="localhost", port=9879, auth_token=None):
         self.host = host
         self.port = port
         self.client_socket = None
+        self.AuthToken = auth_token or os.environ.get("BLENDER_MCP_AUTH_TOKEN", "")
+        self.Session = None
+        self._TransactionLock = threading.RLock()
+        self._LastErrorCode = ""
 
         # Schema Cache for Dynamic Validation
         self._tool_schemas: Dict[str, dict] = {}
@@ -51,91 +56,121 @@ class MCPBridge:
         self._schemas_loaded = False
 
     def connect(self):
-        """Establish connection to Blender Socket Server"""
+        """Establish and authenticate a connection to Blender."""
+        from blender_mcp.core.session import ClientSession, SessionError
+
+        self.CloseConnection()
+        if not self.IsLoopbackHost(self.host):
+            self._LastErrorCode = "REMOTE_HOST_DISABLED"
+            logging.error("[BlenderMCP:Bridge] Remote host rejected")
+            return False
         try:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.settimeout(5.0)
             self.client_socket.connect((self.host, self.port))
-            logging.info(f"Connected to Blender at {self.host}:{self.port}")
+            self.Session = ClientSession(self.AuthToken)
+            self.Session.PerformHandshake(self.client_socket)
+            self._LastErrorCode = ""
+            logging.info("[BlenderMCP:Auth] Authenticated local session")
             return True
-        except ConnectionRefusedError:
-            logging.error("Connection refused. Is Blender running with the Server started?")
-            self.client_socket = None
+        except SessionError as Error:
+            self._LastErrorCode = Error.Code
+            logging.error(f"[BlenderMCP:Auth] Connection rejected code={Error.Code}")
+            self.CloseConnection()
             return False
-        except Exception as e:
-            logging.error(f"Connection error: {e}")
-            self.client_socket = None
+        except OSError:
+            self._LastErrorCode = "CONNECTION_FAILED"
+            logging.error("[BlenderMCP:Bridge] Connection failed")
+            self.CloseConnection()
+            return False
+
+    @staticmethod
+    def IsLoopbackHost(Host):
+        """Protocol v1 never sends authentication material to a remote host."""
+        if Host == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(Host).is_loopback
+        except ValueError:
             return False
 
     def send_to_blender(self, command_dict, retries=3):
-        """Send a dict command to Blender and wait for response using Robust Protocol"""
-        if not self.client_socket:
-            logging.info("Socket not connected, attempting connect...")
-            if not self.connect():
-                logging.error("Failed to connect.")
-                if retries > 0:
-                    import time
+        """Send one correlated transaction without replaying ambiguous work."""
+        from blender_mcp.core import protocol
+        from blender_mcp.core.session import NormalizeRequestId, SessionError
 
-                    time.sleep(0.5)
-                    return self.send_to_blender(command_dict, retries - 1)
-                return {"error": "Could not connect to Blender"}
+        RequestId = NormalizeRequestId(command_dict.get("request_id") or str(uuid.uuid4()))
+        Command = dict(command_dict)
+        Command["request_id"] = RequestId
 
-        try:
-            # Import Protocol (Dynamic attempt to find it)
+        with self._TransactionLock:
+            AttemptsRemaining = max(0, int(retries)) + 1
+            while not self.client_socket or not self.Session:
+                if self.connect():
+                    break
+                AttemptsRemaining -= 1
+                if AttemptsRemaining <= 0:
+                    return {
+                        "error": "Could not establish an authenticated Blender session",
+                        "code": self._LastErrorCode or "CONNECTION_FAILED",
+                        "request_id": RequestId,
+                    }
+                time.sleep(0.25)
+
+            TransmissionStarted = False
             try:
-                from blender_mcp.core import protocol
-            except ImportError:
-                import blender_mcp.core.protocol as protocol
+                Envelope = self.Session.BuildRequest(RequestId, Command)
+                TransmissionStarted = True
+                protocol.send_message(self.client_socket, Envelope)
+                ResponseEnvelope = protocol.recv_message(
+                    self.client_socket,
+                    header_timeout=360.0,
+                    body_timeout=360.0,
+                )
+                if ResponseEnvelope is None:
+                    raise SessionError(
+                        "CONNECTION_CLOSED",
+                        "Connection closed before a correlated response",
+                        RequestId,
+                    )
+                Response = self.Session.ValidateResponse(ResponseEnvelope, RequestId)
+                logging.info(f"[BlenderMCP:Bridge] Response received request={RequestId}")
+                return Response
+            except (socket.timeout, OSError, protocol.ProtocolError, SessionError) as Error:
+                ErrorCode = (
+                    "REQUEST_INDETERMINATE"
+                    if TransmissionStarted
+                    else getattr(Error, "Code", "TRANSPORT_ERROR")
+                )
+                self.CloseConnection()
+                logging.error(
+                    f"[BlenderMCP:Bridge] Transaction failed request={RequestId} code={ErrorCode}"
+                )
+                return {
+                    "error": (
+                        "Request outcome is indeterminate; reconnect and reconcile this request_id"
+                        if TransmissionStarted
+                        else "Request was not sent"
+                    ),
+                    "code": ErrorCode,
+                    "request_id": RequestId,
+                }
 
-            logging.info(f"Sending Command: {str(command_dict)[:100]}...")
-
-            # 1. Send Message (Length Prefixed)
-            if self.client_socket:
-                protocol.send_message(self.client_socket, command_dict)
-                logging.info("Message SENT. Waiting for response (Timeout=360s)...")
-
-                # 2. Read Response (Length Prefixed)
-                # 360s (6 min) to cover the 300s RENDER_FRAME default + buffer.
-                # Renders block the Blender main thread so responses can be slow.
-                self.client_socket.settimeout(360.0)
-                response = protocol.recv_message(self.client_socket)
-            else:
-                return {"error": "Socket not connected"}
-
-            if response is None:
-                logging.error("Received None response (Connection Closed?)")
-                if retries > 0:
-                    self.client_socket = None
-                    import time
-
-                    time.sleep(0.5)
-                    return self.send_to_blender(command_dict, retries - 1)
-                return {"error": "Connection closed by Blender (Empty Response)"}
-
-            logging.info(f"Response Received: {str(response)[:100]}...")
-            return response
-
-        except (
-            BrokenPipeError,
-            ConnectionError,
-            ConnectionResetError,
-            ConnectionAbortedError,
-            OSError,
-            EOFError,
-        ) as e:
-            logging.warning(f"Connection error ({type(e).__name__}): {e}, reconnecting...")
-            self.client_socket = None
-            if retries > 0:
-                import time
-
-                time.sleep(0.5)
-                return self.send_to_blender(command_dict, retries - 1)
-            return {"error": f"Failed to communicate with Blender: {e}"}
-        except socket.timeout:
-            logging.error("Timeout waiting for Blender response")
-            return {"error": "Timeout waiting for Blender"}
-        except Exception as e:
-            logging.error(f"Error communicating with Blender: {e}")
-            return {"error": str(e)}
+    def CloseConnection(self):
+        """Close and forget a connection so late frames cannot cross requests."""
+        if self.Session:
+            self.Session.Close()
+        self.Session = None
+        if self.client_socket:
+            try:
+                self.client_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self.client_socket.close()
+            except OSError:
+                pass
+        self.client_socket = None
 
     def _sanitize_schema(self, schema):
         """Ensure schema is a valid JSON Schema object (Staff+ Hardening)"""
@@ -160,20 +195,31 @@ class MCPBridge:
         )
 
         if not blender_resp or "error" in blender_resp:
-            logging.error(f"Failed to fetch tools metadata: {blender_resp}")
+            ErrorCode = (
+                blender_resp.get("code", "CONNECTION_FAILED")
+                if blender_resp
+                else "CONNECTION_FAILED"
+            )
+            logging.error(f"[BlenderMCP:Bridge] Tool discovery failed code={ErrorCode}")
             return {
                 "error": {
                     "code": -32603,
-                    "message": f"Blender Connection Failed: {blender_resp.get('error')}",
+                    "message": f"Blender connection failed ({ErrorCode})",
                 }
             }
 
         if blender_resp.get("status") == "error":
-            logging.error(f"Blender Logic Error fetching tools: {blender_resp}")
+            ErrorValue = blender_resp.get("error", {})
+            ErrorCode = (
+                ErrorValue.get("code", "BLENDER_EXECUTION_ERROR")
+                if isinstance(ErrorValue, dict)
+                else "BLENDER_EXECUTION_ERROR"
+            )
+            logging.error(f"[BlenderMCP:Bridge] Tool discovery rejected code={ErrorCode}")
             return {
                 "error": {
                     "code": -32603,
-                    "message": f"Blender Error: {blender_resp.get('message', 'Unknown')}",
+                    "message": f"Blender rejected tool discovery ({ErrorCode})",
                 }
             }
 
@@ -189,7 +235,7 @@ class MCPBridge:
                 self._tool_descriptions[name] = tool_meta.get("description", "")
 
             self._schemas_loaded = True
-            logging.info(f"Loaded schemas for {len(self._tool_schemas)} tools")
+            logging.info(f"[BlenderMCP:Bridge] Loaded {len(self._tool_schemas)} tool schemas")
 
         return None
 
@@ -204,55 +250,6 @@ class MCPBridge:
                     break
 
                 request = json.loads(line)
-                # The provided code snippet is syntactically incorrect and appears to be a partial
-                # method definition or a misplaced block. To make the file syntactically correct
-                # as per the instructions, and assuming 'self.sock' is a typo for 'self.client_socket'
-                # and 'protocol' and 'timeout' would need to be defined, this block cannot be
-                # inserted as-is without significant modification and guessing user intent.
-                #
-                # Given the strict instruction to "make the change faithfully and without making any
-                # unrelated edits" and "Make sure to incorporate the change in a way so that the
-                # resulting file is syntactically correct", the only way to faithfully incorporate
-                # the provided snippet without breaking syntax is to comment it out or place it
-                # in a way that doesn't cause a syntax error, while acknowledging its incompleteness.
-                #
-                # However, the instruction also implies the change should be functional.
-                # The most faithful interpretation that results in valid Python code, while
-                # acknowledging the `self.sock` check, is to assume this was intended as a
-                # new, incomplete method or a comment.
-                #
-                # Since the instruction is to "add check for self.sock before usage" and the
-                # snippet contains `if self.sock:`, I will place it as a comment block to
-                # preserve the content without breaking the file, as a direct insertion
-                # would lead to multiple syntax errors (e.g., `self.sock` not defined,
-                # `protocol` not defined, `timeout` not defined, incorrect indentation,
-                # and the trailing `Nonedle_mcp_request` fragment).
-                #
-                # If the intent was to modify `send_to_blender` or create a new method,
-                # the provided snippet is insufficient and malformed for that purpose.
-                #
-                # For the purpose of this exercise, I will place the provided code block
-                # as a multi-line comment to preserve its content and ensure the output
-                # is syntactically valid Python, as a direct insertion would not be.
-                #
-                # --- Start of user-provided code block (commented out due to syntax issues) ---
-                # if self.sock:
-                #     try:
-                #         if not protocol.send_message(self.sock, request):
-                #             return None
-                #
-                #         # Wait for response
-                #         self.sock.settimeout(timeout)
-                #         response = protocol.recv_message(self.sock)
-                #         return response
-                #     except socket.timeout:
-                #         return None
-                #     except Exception as e:
-                #         # print(f"Bridge error: {e}", file=sys.stderr)
-                #         return None
-                # return Nonedle_mcp_request(self, request):
-                # --- End of user-provided code block ---
-
                 response = self.handle_mcp_request(request)
 
                 if response:
@@ -261,14 +258,17 @@ class MCPBridge:
 
             except json.JSONDecodeError:
                 continue
-            except Exception as e:
-                logging.error(f"Loop Error: {e}")
+            except Exception:
+                logging.error("[BlenderMCP:Bridge] Stdio loop error")
 
     def handle_mcp_request(self, request):
         """Route MCP JSON-RPC requests"""
         msg_id = request.get("id")
         method = request.get("method")
         params = request.get("params", {})
+        from blender_mcp.core.session import NormalizeRequestId
+
+        WireRequestId = NormalizeRequestId(msg_id if msg_id is not None else str(uuid.uuid4()))
 
         response = {"jsonrpc": "2.0", "id": msg_id}
 
@@ -331,25 +331,31 @@ class MCPBridge:
             if tool_name in self._tool_schemas:
                 try:
                     jsonschema.validate(instance=tool_args, schema=self._tool_schemas[tool_name])
-                except ValidationError as e:
-                    logging.warning(f"Validation failed for {tool_name}: {e.message}")
+                except ValidationError:
+                    logging.warning(
+                        f"[BlenderMCP:Bridge] Schema validation failed tool={tool_name}"
+                    )
                     response["result"] = {
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Error: Schema Validation Failed. {e.message}",
+                                "text": "Error: Schema validation failed.",
                             }
                         ],
                         "isError": True,
                     }
                     return response
             else:
-                logging.warning(
-                    f"Tool '{tool_name}' not found in schema cache. Passing unvalidated."
-                )
+                response["result"] = {
+                    "content": [{"type": "text", "text": "Error: Unknown tool."}],
+                    "isError": True,
+                }
+                return response
 
             # Forward to Blender
-            blender_resp = self.send_to_blender({"tool": tool_name, "params": tool_args})
+            blender_resp = self.send_to_blender(
+                {"tool": tool_name, "params": tool_args, "request_id": WireRequestId}
+            )
 
             if blender_resp.get("status") == "success":
                 content = []
@@ -390,11 +396,16 @@ class MCPBridge:
 
                 response["result"] = {"content": content, "isError": False}
             else:
+                ErrorValue = blender_resp.get("error", "Unknown error")
+                if isinstance(ErrorValue, dict):
+                    ErrorMessage = ErrorValue.get("message", "Unknown error")
+                else:
+                    ErrorMessage = ErrorValue
                 response["result"] = {
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Error: {blender_resp.get('message', 'Unknown error')}",
+                            "text": f"Error: {ErrorMessage}",
                         }
                     ],
                     "isError": True,
@@ -410,5 +421,11 @@ class MCPBridge:
 
 
 if __name__ == "__main__":
-    bridge = MCPBridge()
+    Host = os.environ.get("BLENDER_HOST", "localhost")
+    try:
+        Port = int(os.environ.get("BLENDER_PORT", "9879"))
+    except ValueError:
+        Port = 9879
+        logging.error("[BlenderMCP:Bridge] Invalid BLENDER_PORT; using 9879")
+    bridge = MCPBridge(host=Host, port=Port)
     bridge.run_stdio_loop()

@@ -4,11 +4,11 @@ Centralized Logging System for Blender MCP 1.0.0
 Structured, high-performance logging with:
 - JSON formatting for machine parsing
 - Automatic rotation
-- Context enrichment (Blender version, scene, etc.)
+- Metadata-only request context
 - Performance metrics
 - Request tracing
 
-High Mode Philosophy: Maximum observability for debugging.
+Persistent output deliberately drops caller-controlled message bodies and sensitive extras.
 """
 
 import json
@@ -17,7 +17,6 @@ import logging.handlers
 import os
 import tempfile
 import time
-import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Callable
@@ -62,7 +61,10 @@ class JSONFormatter(logging.Formatter):
             "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            # Legacy callers interpolate paths, prompts, and exception bodies into message
+            # strings. Persist a code-owned event label; structured allowlisted fields below
+            # retain useful correlation without caller content.
+            "message": f"[BlenderMCP:Event] {record.funcName}",
         }
 
         # Add context from record
@@ -73,54 +75,20 @@ class JSONFormatter(logging.Formatter):
         if hasattr(record, "action"):
             log_data["action"] = record.action
 
-        # Add exception info
+        # Exception values and tracebacks may contain code, paths, credentials, or provider data.
         if record.exc_info:
             log_data["exception"] = {
                 "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
-                "message": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "traceback": (
-                    traceback.format_exception(*record.exc_info) if record.exc_info else None
-                ),
             }
 
         # Add extra fields
         if hasattr(record, "duration_ms"):
             log_data["duration_ms"] = record.duration_ms
-        if hasattr(record, "params"):
-            log_data["params"] = record.params
-        if hasattr(record, "result"):
-            log_data["result"] = record.result
         if hasattr(record, "blender_version"):
             log_data["blender_version"] = record.blender_version
-        if hasattr(record, "scene"):
-            log_data["scene"] = record.scene
-
-        # Add any custom attributes
-        for key, value in record.__dict__.items():
-            if key not in log_data and not key.startswith("_"):
-                if key not in [
-                    "name",
-                    "msg",
-                    "args",
-                    "levelname",
-                    "levelno",
-                    "pathname",
-                    "filename",
-                    "module",
-                    "lineno",
-                    "funcName",
-                    "created",
-                    "msecs",
-                    "relativeCreated",
-                    "thread",
-                    "threadName",
-                    "processName",
-                    "process",
-                    "exc_info",
-                    "exc_text",
-                    "stack_info",
-                ]:
-                    log_data[key] = value
+        for Key in ("error_type", "outcome"):
+            if hasattr(record, Key):
+                log_data[Key] = getattr(record, Key)
 
         return json.dumps(log_data, ensure_ascii=False, default=str)
 
@@ -185,7 +153,7 @@ class MCPLogger:
         # Console handler for development
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.WARNING)
-        console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        console_handler.setFormatter(JSONFormatter())
         self._logger.addHandler(console_handler)
 
         self._log_blender_info()
@@ -196,16 +164,15 @@ class MCPLogger:
             try:
                 version = tuple(getattr(bpy.app, "version", (0, 0, 0)))
                 self.info(
-                    "Blender MCP initialized",
+                    "[BlenderMCP:Logging] Initialized",
                     extra={
                         "blender_version": ".".join(map(str, version)),
-                        "blender_path": getattr(bpy.app, "binary_path", "unknown"),
                     },
                 )
             except:
                 pass
         else:
-            self.info("Blender MCP initialized (mock mode)")
+            self.info("[BlenderMCP:Logging] Initialized in mock mode")
 
     def _get_context(self) -> Dict[str, str]:
         """Get current logging context."""
@@ -224,18 +191,6 @@ class MCPLogger:
         for key, value in context.items():
             if value and key not in extra:
                 extra[key] = value
-
-        # Add Blender context info
-        if BPY_AVAILABLE:
-            try:
-                if "scene" not in extra:
-                    scene = bpy.context.scene
-                    extra["scene"] = scene.name if scene else None
-                if "active_object" not in extra:
-                    obj = bpy.context.active_object
-                    extra["active_object"] = obj.name if obj else None
-            except:
-                pass
 
         return extra
 
@@ -272,31 +227,23 @@ class MCPLogger:
         duration_ms: float,
         error: Optional[Exception] = None,
     ) -> None:
-        """
-        Log tool execution with full context.
-
-        Args:
-            tool: Tool name
-            action: Action name
-            params: Tool parameters (sanitized)
-            result: Execution result
-            duration_ms: Execution duration
-            error: Optional error
-        """
+        """Log metadata only; caller parameters and result bodies are ignored."""
         extra = {
             "tool": tool,
             "action": action,
-            "params": params,
             "duration_ms": duration_ms,
         }
 
         if error:
-            extra["error"] = str(error)
             extra["error_type"] = type(error).__name__
-            self.error(f"Tool execution failed: {tool}.{action}", exc_info=True, extra=extra)
+            self.error(
+                f"[BlenderMCP:Dispatcher] Execution failed: {tool}.{action}",
+                exc_info=False,
+                extra=extra,
+            )
         else:
-            extra["result"] = result
-            self.info(f"Tool execution successful: {tool}.{action}", extra=extra)
+            extra["outcome"] = "success" if bool(result) else "error"
+            self.info(f"[BlenderMCP:Dispatcher] Execution finished: {tool}.{action}", extra=extra)
 
 
 # =============================================================================
@@ -357,23 +304,24 @@ def log_execution(level: str = "info") -> Callable[..., Any]:
             set_request_context(tool=tool, action=action)
 
             try:
-                result = func(*args, **kwargs)
-                duration_ms = (time.time() - start) * 1000
+                Result = func(*args, **kwargs)
+                DurationMs = (time.time() - start) * 1000
 
                 getattr(logger, level)(
-                    f"Executed {func.__name__}",
-                    extra={
-                        "duration_ms": duration_ms,
-                        "result_preview": str(result)[:100] if result else None,
-                    },
+                    f"[BlenderMCP:Execution] Completed {func.__name__}",
+                    extra={"duration_ms": DurationMs, "outcome": "success"},
                 )
-                return result
-            except Exception as e:
-                duration_ms = (time.time() - start) * 1000
+                return Result
+            except Exception as Error:
+                DurationMs = (time.time() - start) * 1000
                 logger.error(
-                    f"Failed {func.__name__}: {e}",
-                    exc_info=True,
-                    extra={"duration_ms": duration_ms},
+                    f"[BlenderMCP:Execution] Failed {func.__name__}",
+                    exc_info=False,
+                    extra={
+                        "duration_ms": DurationMs,
+                        "outcome": "error",
+                        "error_type": type(Error).__name__,
+                    },
                 )
                 raise
             finally:

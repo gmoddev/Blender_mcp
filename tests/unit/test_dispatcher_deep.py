@@ -22,7 +22,7 @@ sys.modules.setdefault("mathutils", MagicMock())
 sys.modules.setdefault("mathutils.bvhtree", MagicMock())
 sys.modules.setdefault("bmesh", MagicMock())
 
-from blender_mcp.dispatcher import (
+from blender_mcp.dispatcher import (  # noqa: E402
     HANDLER_REGISTRY,
     HANDLER_METADATA,
     dispatch_command,
@@ -179,13 +179,13 @@ class TestDispatchErrors:
         assert result.get("code") == "VALIDATION_ERROR"
 
     def test_security_violation_returns_error(self) -> None:
-        """When SecurityManager blocks, SECURITY_VIOLATION code is returned."""
+        """When SecurityManager blocks, the capability error is returned."""
         with patch("blender_mcp.dispatcher.SecurityManager.validate_action", return_value=False):
             result = dispatch_command(
                 {"tool": "list_all_tools", "params": {"action": "list_all_tools"}},
                 use_thread_safety=False,
             )
-            assert result.get("code") == "SECURITY_VIOLATION"
+            assert result.get("code") == "CAPABILITY_DENIED"
 
     def test_exception_with_debug_context_includes_traceback(self) -> None:
         """With debug context, traceback should be in the error result."""

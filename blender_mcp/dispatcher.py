@@ -20,7 +20,7 @@ import traceback
 from typing import Dict, Any, List, Optional, Callable, cast
 
 from . import handlers
-from .core.security import SecurityManager
+from .core.security import Capability, SecurityManager
 from .core.parameter_validator import validate_params_schema
 
 # V1.0.0: ResponseBuilder + Semantic Memory + Intent-Based Animation
@@ -45,6 +45,7 @@ def register_handler(
     category: str = "general",
     description: Optional[str] = None,
     priority: int = 100,
+    capabilities: Optional[Dict[str, List[str]]] = None,
 ) -> Callable[[Callable[..., Any]], HandlerProtocol]:
     """
     Decorator to register a function as a handler for a specific command.
@@ -85,6 +86,14 @@ def register_handler(
 
         HANDLER_REGISTRY[command_name] = cast(HandlerProtocol, func)
 
+        # Foundation 0C migration policy: existing structured actions are
+        # conservatively MUTATE until their module receives an explicit audit.
+        # New handlers should pass action-level capabilities explicitly.
+        ResolvedCapabilities = {
+            Action: list((capabilities or {}).get(Action, [Capability.MUTATE.value]))
+            for Action in resolved_actions
+        }
+
         # Extract docstring as description
         doc_description = inspect.getdoc(func) or "No description provided."
         final_description = description or doc_description
@@ -98,6 +107,7 @@ def register_handler(
             "module": func.__module__,
             "category": category,
             "priority": priority,
+            "capabilities": ResolvedCapabilities,
         }
 
         # Attach metadata to function for introspection.
@@ -106,6 +116,7 @@ def register_handler(
         setattr(func, "_handler_actions", resolved_actions)
         setattr(func, "_handler_schema", schema or {})
         setattr(func, "_handler_category", category)
+        setattr(func, "_handler_capabilities", ResolvedCapabilities)
 
         logger.debug(
             f"Registered handler: {command_name}",
@@ -119,6 +130,7 @@ def register_handler(
 
 @register_handler(
     "get_server_status",
+    capabilities={"get_server_status": [Capability.READ.value]},
     schema={
         "type": "object",
         "title": "Get Server Status (ESSENTIAL)",
@@ -273,6 +285,7 @@ def _build_system_manifest(tools_list: List[Any], title: str = "System Tools Man
 
 @register_handler(
     "list_all_tools",
+    capabilities={"list_all_tools": [Capability.READ.value]},
     schema={
         "type": "object",
         "properties": {
@@ -446,6 +459,7 @@ def list_all_tools(**params: Any) -> Dict[str, Any]:
 
 @register_handler(
     "validate_tool",
+    capabilities={"validate_tool": [Capability.READ.value]},
     schema={
         "type": "object",
         "properties": {
@@ -520,19 +534,21 @@ def dispatch_command(
         Handler result or error dict
     """
     tool_name = command.get("tool")
-    params = command.get("params", {})
+    RawParams = command.get("params", {})
+    params = RawParams if isinstance(RawParams, dict) else {}
     action = str(params.get("action", "unknown"))
+    LogToolName, LogActionName = _GetSafeLogLabels(tool_name, action)
 
     # Set up logging context
     request_id = set_request_context(
-        request_id=command.get("request_id"), tool=tool_name, action=action
+        request_id=command.get("request_id"), tool=LogToolName, action=LogActionName
     )
 
     start_time = time.time()
 
     logger.debug(
-        f"Dispatching command: {tool_name}.{action}",
-        extra={"tool": tool_name, "action": action, "params": params, "request_id": request_id},
+        f"[BlenderMCP:Dispatcher] Dispatching {LogToolName}.{LogActionName}",
+        extra={"tool": LogToolName, "action": LogActionName, "request_id": request_id},
     )
 
     # Validate tool name
@@ -540,16 +556,6 @@ def dispatch_command(
         error_result: Dict[str, Any] = {
             "error": "Command must contain a 'tool' key",
             "code": "MISSING_TOOL",
-        }
-        _log_execution(tool_name, action, params, error_result, start_time, None)
-        return error_result
-
-    # Security Check
-    if not SecurityManager.validate_action(tool_name, action):
-        error_result = {
-            "error": f"Security Violation: '{tool_name}' is blocked in Safe Mode.",
-            "code": "SECURITY_VIOLATION",
-            "is_security_violation": True,
         }
         _log_execution(tool_name, action, params, error_result, start_time, None)
         return error_result
@@ -564,6 +570,7 @@ def dispatch_command(
     metadata = cast(HandlerMetadata, HANDLER_METADATA.get(tool_name, {}))
     actions = metadata.get("actions", [])
     schema = metadata.get("schema", {})
+    ActionCapabilities = metadata.get("capabilities", {}).get(action)
 
     # Validate action if specified
     if actions and action not in actions:
@@ -573,6 +580,17 @@ def dispatch_command(
             "valid_actions": actions,
         }
         _log_execution(tool_name, action, params, error_result, start_time, None)
+        return error_result
+
+    # Missing and unknown capability classifications fail closed before schema
+    # parsing or handler invocation.
+    if not SecurityManager.validate_action(tool_name, action, ActionCapabilities):
+        error_result = {
+            "error": "Action is not authorized by the effective security mode",
+            "code": "CAPABILITY_DENIED",
+            "is_security_violation": True,
+        }
+        _log_execution(tool_name, action, {}, error_result, start_time, None)
         return error_result
 
     # Validate schema if provided
@@ -681,20 +699,26 @@ def _log_execution(
 ) -> None:
     """Log execution with timing."""
     duration_ms = (time.time() - start_time) * 1000
-
-    # Sanitize params (remove sensitive data)
-    safe_params = {
-        k: v for k, v in params.items() if k not in ["password", "api_key", "secret", "token"]
-    }
+    LogToolName, LogActionName = _GetSafeLogLabels(tool, action)
 
     logger.log_tool_execution(
-        tool=tool or "unknown_tool",
-        action=action,
-        params=safe_params,
+        tool=LogToolName,
+        action=LogActionName,
+        params={},
         result=result.get("success", False),
         duration_ms=duration_ms,
         error=error,
     )
+
+
+def _GetSafeLogLabels(Tool: Any, Action: Any) -> tuple[str, str]:
+    """Allow only registered tool/action labels into persistent metadata."""
+    if not isinstance(Tool, str) or Tool not in HANDLER_REGISTRY:
+        return "unknown", "unknown"
+    Metadata = cast(Dict[str, Any], HANDLER_METADATA.get(Tool, {}))
+    KnownActions = Metadata.get("actions", [])
+    SafeAction = Action if isinstance(Action, str) and Action in KnownActions else "unknown"
+    return Tool, SafeAction
 
 
 def load_handlers() -> None:

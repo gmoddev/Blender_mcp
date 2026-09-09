@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 # Use typing.TypedDict for Python < 3.12 compatibility
 from typing import TypedDict
 
-
 # ============================================================================
 # REGISTRY PROTOCOLS
 # ============================================================================
@@ -39,6 +38,7 @@ class HandlerMetadata(TypedDict):
     module: str
     category: str
     priority: int
+    capabilities: Dict[str, List[str]]
 
 
 # ============================================================================

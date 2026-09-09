@@ -7,19 +7,26 @@ No bpy required — pure Python socket-level tests.
 from __future__ import annotations
 
 import json
+import math
 import struct
 import socket
 import sys
 import os
-from unittest.mock import MagicMock
+import pytest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 sys.modules.setdefault("bpy", MagicMock())
 sys.modules.setdefault("mathutils", MagicMock())
 
-from blender_mcp.core.protocol import send_message, recv_message, _recv_n
-
+from blender_mcp.core.protocol import (  # noqa: E402
+    MAX_FRAME_BYTES,
+    ProtocolError,
+    _recv_n,
+    recv_message,
+    send_message,
+)
 
 # ---------------------------------------------------------------------------
 # _recv_n helper tests
@@ -61,6 +68,14 @@ class TestRecvN:
         sock.recv.side_effect = [b"ab", b""]
         result = _recv_n(sock, 5)
         assert result is None
+
+    def test_recv_n_uses_absolute_deadline(self) -> None:
+        """A peer cannot extend a total frame deadline by dripping bytes."""
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.return_value = b"a"
+        with patch("blender_mcp.core.protocol.time.monotonic", side_effect=[0.0, 2.0]):
+            with pytest.raises(socket.timeout):
+                _recv_n(sock, 2, Deadline=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +147,13 @@ class TestSendMessage:
         length = struct.unpack(">I", sent_bytes[:4])[0]
         assert length > 100_000
 
+    def test_send_rejects_non_finite_json(self) -> None:
+        """NaN and infinity never enter the protocol."""
+        sock = MagicMock(spec=socket.socket)
+        with pytest.raises(ProtocolError) as Error:
+            send_message(sock, {"value": math.nan})
+        assert Error.value.Code == "INVALID_JSON"
+
 
 # ---------------------------------------------------------------------------
 # recv_message tests
@@ -164,16 +186,17 @@ class TestRecvMessage:
         result = recv_message(sock)
         assert result is None
 
-    def test_recv_returns_none_on_body_close(self) -> None:
-        """recv_message returns None when body read gets empty bytes."""
+    def test_recv_rejects_truncated_body(self) -> None:
+        """A mid-frame close is distinguishable from a clean EOF."""
         body = json.dumps({"x": 1}).encode("utf-8")
         header = struct.pack(">I", len(body))
 
         sock = MagicMock(spec=socket.socket)
         sock.recv.side_effect = [header, b""]  # header OK, body closed
 
-        result = recv_message(sock)
-        assert result is None
+        with pytest.raises(ProtocolError, match="frame completed") as Error:
+            recv_message(sock)
+        assert Error.value.Code == "TRUNCATED_FRAME"
 
     def test_recv_raises_on_timeout(self) -> None:
         """recv_message propagates socket.timeout."""
@@ -186,16 +209,70 @@ class TestRecvMessage:
         except socket.timeout:
             pass
 
-    def test_recv_returns_none_on_invalid_json(self) -> None:
-        """recv_message returns None for malformed JSON body."""
+    def test_recv_rejects_invalid_json(self) -> None:
+        """Malformed JSON is a typed protocol failure."""
         bad_body = b"not-json{{"
         header = struct.pack(">I", len(bad_body))
 
         sock = MagicMock(spec=socket.socket)
         sock.recv.side_effect = [header, bad_body]
 
-        result = recv_message(sock)
-        assert result is None
+        with pytest.raises(ProtocolError) as Error:
+            recv_message(sock)
+        assert Error.value.Code == "INVALID_JSON"
+
+    def test_recv_rejects_zero_length(self) -> None:
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.side_effect = [struct.pack(">I", 0)]
+        with pytest.raises(ProtocolError) as Error:
+            recv_message(sock)
+        assert Error.value.Code == "INVALID_FRAME_LENGTH"
+
+    def test_recv_rejects_oversize_before_body_read(self) -> None:
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.side_effect = [struct.pack(">I", MAX_FRAME_BYTES + 1)]
+        with pytest.raises(ProtocolError) as Error:
+            recv_message(sock)
+        assert Error.value.Code == "FRAME_TOO_LARGE"
+        assert sock.recv.call_count == 1
+
+    def test_recv_rejects_non_object_json(self) -> None:
+        body = b"[]"
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.side_effect = [struct.pack(">I", len(body)), body]
+        with pytest.raises(ProtocolError) as Error:
+            recv_message(sock)
+        assert Error.value.Code == "INVALID_MESSAGE"
+
+    def test_recv_accepts_split_unicode(self) -> None:
+        body = json.dumps({"name": "camera \U0001f4f7"}, ensure_ascii=False).encode("utf-8")
+        split = body.index("\U0001f4f7".encode("utf-8")) + 1
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.side_effect = [struct.pack(">I", len(body)), body[:split], body[split:]]
+        assert recv_message(sock) == {"name": "camera \U0001f4f7"}
+
+    def test_send_accepts_exact_configured_limit(self) -> None:
+        sock = MagicMock(spec=socket.socket)
+        data = {"value": "bounded"}
+        encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        assert send_message(sock, data, max_frame_bytes=len(encoded)) is True
+
+    def test_send_rejects_configured_limit_plus_one(self) -> None:
+        sock = MagicMock(spec=socket.socket)
+        data = {"value": "bounded"}
+        encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        with pytest.raises(ProtocolError) as Error:
+            send_message(sock, data, max_frame_bytes=len(encoded) - 1)
+        assert Error.value.Code == "FRAME_TOO_LARGE"
+        sock.sendall.assert_not_called()
+
+    def test_recv_rejects_excessive_json_depth(self) -> None:
+        nested_json = ('{"value":' + "[" * 2000 + "0" + "]" * 2000 + "}").encode("utf-8")
+        sock = MagicMock(spec=socket.socket)
+        sock.recv.side_effect = [struct.pack(">I", len(nested_json)), nested_json]
+        with pytest.raises(ProtocolError) as Error:
+            recv_message(sock)
+        assert Error.value.Code == "JSON_TOO_DEEP"
 
 
 # ---------------------------------------------------------------------------
