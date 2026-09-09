@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **499** |
-| **Integration** | `tests/integration/` | End-to-end tests using mock MCP bridge responses | 24 |
-| **Grand total** | | | **523** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **535** |
+| **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
+| **Grand total collected** | | | **583** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -36,7 +36,7 @@ make test-cov     # Full suite with HTML + XML coverage
 
 ## Unit Test Files (`tests/unit/`)
 
-### `test_essential_tools.py` (183 tests)
+### `test_essential_tools.py` (182 tests)
 Comprehensive tests for all 8 ESSENTIAL tier tools (priority ≤ 9). All tests run through `dispatch_command` (real execution path) with mocked bpy.
 
 Covers: `execute_blender_code`, `get_scene_graph` (11 actions: GET_OBJECTS_FLAT, GET_SCENE_MATRIX, ANALYZE_ASSEMBLY, CAST_RAY, VERIFY_ASSEMBLY, GET_SPATIAL_REPORT, DETECT_GEOMETRY_ERRORS, GEOMETRY_COMPLEXITY, CHECK_PRODUCTION_READINESS, GET_HIERARCHY_TREE), `get_viewport_screenshot_base64`, `get_object_info`, `manage_agent_context` (GET_PRIMER, GET_TACTICS, GET_TOOL_CATALOG, GET_ACTION_HELP), `list_all_tools`, `get_server_status`, `new_scene`.
@@ -47,7 +47,7 @@ uv run pytest tests/unit/test_essential_tools.py -v
 
 ---
 
-### `test_parameter_validator.py` (60 tests) — NEW in live-37
+### `test_parameter_validator.py` (59 tests)
 Tests `ParameterValidator` — type coercion, schema validation, enum checks, bounds clamping, and decorators.
 
 | Class | Tests | Coverage |
@@ -70,7 +70,7 @@ uv run pytest tests/unit/test_parameter_validator.py -v
 
 ---
 
-### `test_intent_router.py` (35 tests) — NEW in live-37
+### `test_intent_router.py` (34 tests)
 Tests `IntentRouter` — multi-language intent classification, handler routing, workflow suggestions.
 
 | Class | Tests | Coverage |
@@ -87,7 +87,7 @@ uv run pytest tests/unit/test_intent_router.py -v
 
 ---
 
-### `test_execution_engine.py` (31 tests) — NEW in live-37
+### `test_execution_engine.py` (30 tests)
 Tests `ExecutionEngine` — policy enforcement, operator safety, batch execution, decorators, and SafeOps proxy.
 
 | Class | Tests | Coverage |
@@ -108,7 +108,7 @@ uv run pytest tests/unit/test_execution_engine.py -v
 
 ---
 
-### `test_dispatcher_deep.py` (28 tests) — NEW in live-37
+### `test_dispatcher_deep.py` (27 tests)
 Deep coverage for `dispatcher.py` — paths not covered by `test_dispatch_routing.py`.
 
 | Class | Tests | Coverage |
@@ -128,7 +128,7 @@ uv run pytest tests/unit/test_dispatcher_deep.py -v
 
 ---
 
-### `test_job_manager.py` (25 tests) — NEW in live-37
+### `test_job_manager.py` (24 tests)
 Tests `AsyncJobManager` — job lifecycle, status polling, progress tracking, cancellation, and eviction.
 
 | Class | Tests | Coverage |
@@ -147,7 +147,7 @@ uv run pytest tests/unit/test_job_manager.py -v
 
 ---
 
-### `test_semantic_memory.py` (25 tests) — NEW in live-37
+### `test_semantic_memory.py` (24 tests)
 Tests `SemanticSceneMemory` — tag-based object resolution, manual tagging, access tracking, and singleton.
 
 | Class | Tests | Coverage |
@@ -164,7 +164,7 @@ uv run pytest tests/unit/test_semantic_memory.py -v
 
 ---
 
-### `test_dispatch_routing.py` (23 tests)
+### `test_dispatch_routing.py` (22 tests)
 Tests dispatcher routing, action validation, system manifest generation, and essential-tier registration.
 
 | Class | Tests | Coverage |
@@ -180,7 +180,7 @@ uv run pytest tests/unit/test_dispatch_routing.py -v
 
 ---
 
-### `test_response_builder.py` (21 tests)
+### `test_response_builder.py` (20 tests)
 Tests `ResponseBuilder` and `ResponseTimer` — no bpy required.
 
 | Test | What It Checks |
@@ -198,14 +198,14 @@ uv run pytest tests/unit/test_response_builder.py -v
 
 ---
 
-### `test_protocol.py` (17 tests) — NEW in live-37
+### `test_protocol.py` (25 tests)
 Tests wire protocol (4-byte Big-Endian length-prefix + JSON over TCP).
 
 | Class | Tests | Coverage |
 |-------|-------|----------|
-| `TestRecvN` | 5 | Exact bytes, multi-chunk, connection close, zero bytes, partial then close |
-| `TestSendMessage` | 5 | Simple dict, empty dict, Unicode, socket error propagation, large payload (>100KB) |
-| `TestRecvMessage` | 5 | Simple parse, closed connection (header/body), timeout propagation, invalid JSON |
+| `TestRecvN` | 6 | Exact bytes, multi-chunk, connection close, zero bytes, partial close, absolute deadline |
+| `TestSendMessage` | 6 | Objects, Unicode, socket errors, large payloads, and non-finite rejection |
+| `TestRecvMessage` | 12 | Valid parsing plus closed, truncated, timeout, malformed, zero, oversized, non-object, split-Unicode, and depth cases |
 | `TestRoundTrip` | 1 | send → recv produces identical dict |
 
 ```bash
@@ -214,7 +214,7 @@ uv run pytest tests/unit/test_protocol.py -v
 
 ---
 
-### `test_registry_completeness.py` (15 tests)
+### `test_registry_completeness.py` (14 tests)
 Loads all handlers via `load_handlers()` and verifies registry integrity.
 
 | Class | Tests | Coverage |
@@ -230,7 +230,7 @@ uv run pytest tests/unit/test_registry_completeness.py -v
 
 ---
 
-### `test_error_protocol.py` (13 tests)
+### `test_error_protocol.py` (12 tests)
 Tests `ErrorCode` enum and `create_error()` factory.
 
 ```bash
@@ -239,7 +239,7 @@ uv run pytest tests/unit/test_error_protocol.py -v
 
 ---
 
-### `test_smoke.py` (10 tests)
+### `test_smoke.py` (9 tests)
 Minimal sanity checks: core entrypoints exist, handler count ≥ 50, ESSENTIAL tier declared, version consistency.
 
 ```bash
@@ -248,7 +248,7 @@ uv run pytest tests/unit/test_smoke.py -v
 
 ---
 
-### `test_engine.py` (9 tests)
+### `test_engine.py` (8 tests)
 MCP bridge JSON-schema validation layer + `execute_blender_code` blocking patterns.
 
 ```bash
@@ -257,7 +257,7 @@ uv run pytest tests/unit/test_engine.py -v
 
 ---
 
-### `test_manage_history.py` (9 tests)
+### `test_manage_history.py` (8 tests)
 Session-level checkpoint stack logic from `manage_history.py` without bpy.
 
 ```bash
@@ -266,7 +266,7 @@ uv run pytest tests/unit/test_manage_history.py -v
 
 ---
 
-### `test_security.py` (6 tests) — NEW in live-37
+### `test_security.py` (9 tests)
 Tests `SecurityManager` High Mode — all actions permitted.
 
 ```bash
@@ -275,7 +275,7 @@ uv run pytest tests/unit/test_security.py -v
 
 ---
 
-### `test_scene_graph_geo_center.py` (6 tests)
+### `test_scene_graph_geo_center.py` (5 tests)
 Bounding-box geometry center computation and origin-offset warnings.
 
 ```bash
@@ -305,26 +305,29 @@ uv run pytest tests/integration/test_incident_replay_p11.py -v
 
 | File | Tests | Module Covered |
 |------|-------|----------------|
-| `test_essential_tools.py` | 183 | 8 ESSENTIAL tier handlers |
-| `test_parameter_validator.py` | 60 | `core/parameter_validator.py` |
-| `test_intent_router.py` | 35 | `core/intent_router.py` |
-| `test_execution_engine.py` | 31 | `core/execution_engine.py` |
-| `test_dispatcher_deep.py` | 28 | `dispatcher.py` (deep paths) |
-| `test_semantic_memory.py` | 25 | `core/semantic_memory.py` |
-| `test_job_manager.py` | 25 | `core/job_manager.py` |
-| `test_dispatch_routing.py` | 23 | `dispatcher.py` (routing) |
-| `test_response_builder.py` | 21 | `core/response_builder.py` |
-| `test_protocol.py` | 17 | `core/protocol.py` |
-| `test_registry_completeness.py` | 15 | Handler registry integrity |
-| `test_error_protocol.py` | 13 | `core/error_protocol.py` |
-| `test_smoke.py` | 10 | Project structure sanity |
-| `test_engine.py` | 9 | MCP bridge validation |
-| `test_manage_history.py` | 9 | `handlers/manage_history.py` |
-| `test_security.py` | 6 | `core/security.py` |
-| `test_scene_graph_geo_center.py` | 6 | Geometry center computation |
-| **Unit total** | **499** | |
-| `test_incident_replay_p11_mock.py` | 24 | Mock integration |
-| **Grand total** | **523** | |
+| `test_essential_tools.py` | 182 | 8 ESSENTIAL tier handlers |
+| `test_parameter_validator.py` | 59 | `core/parameter_validator.py` |
+| `test_intent_router.py` | 34 | `core/intent_router.py` |
+| `test_execution_engine.py` | 30 | `core/execution_engine.py` |
+| `test_dispatcher_deep.py` | 27 | `dispatcher.py` (deep paths) |
+| `test_semantic_memory.py` | 24 | `core/semantic_memory.py` |
+| `test_job_manager.py` | 24 | `core/job_manager.py` |
+| `test_dispatch_routing.py` | 22 | `dispatcher.py` (routing) |
+| `test_response_builder.py` | 20 | `core/response_builder.py` |
+| `test_protocol.py` | 25 | `core/protocol.py` |
+| `test_registry_completeness.py` | 14 | Handler registry integrity |
+| `test_error_protocol.py` | 12 | `core/error_protocol.py` |
+| `test_smoke.py` | 9 | Project structure sanity |
+| `test_engine.py` | 8 | MCP bridge validation |
+| `test_manage_history.py` | 8 | `handlers/manage_history.py` |
+| `test_security.py` | 9 | `core/security.py` |
+| `test_scene_graph_geo_center.py` | 5 | Geometry center computation |
+| `test_authenticated_transport.py` | 8 | Authenticated loopback integration |
+| `test_session.py` | 12 | Session authentication and correlation |
+| `test_logging_privacy.py` | 3 | Metadata-only logging |
+| **Unit total** | **535** | |
+| Integration files | 48 | 24 mock plus 24 live Blender cases |
+| **Grand total collected** | **583** | |
 
 ---
 

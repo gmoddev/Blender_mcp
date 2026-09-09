@@ -1,10 +1,10 @@
-> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This project builds on that idea with a production-grade architecture: 69 tool groups, 550+ actions, multilingual intent routing, BVH assembly analysis, thread-safe execution, and a 499-test suite.
+> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This fork retains 69 tool groups and 550+ actions while hardening the system toward a production-grade architecture. The current unit suite contains 535 tests.
 
 ---
 
 # Blender MCP
 
-**Control Blender with AI — naturally, reliably, at production scale.**
+**Control Blender with AI through an explicit, testable local trust boundary.**
 
 Give Claude, GPT, or any MCP-capable AI the ability to create, inspect, and animate 3D scenes in Blender using plain language and structured tool calls.
 
@@ -21,11 +21,19 @@ Give Claude, GPT, or any MCP-capable AI the ability to create, inspect, and anim
 
 In practice: tell your AI *"create a red metallic sphere above the cube"* or *"check if all drone parts are touching"* and it will call the right Blender tools, get real geometry data back, and show you a screenshot — no Python required from your side.
 
-> **Local-only.** Blender must be installed and running on your machine. The `bpy` API only exists inside Blender's own Python — there is no cloud version.
+> **Authenticated local control.** Blender must be installed and running locally. Loopback is not treated as caller identity: the add-on and bridge require the same authentication credential before tool discovery or execution.
 
-> **`execute_blender_code` is the primary tool.** Almost everything you can do with the other 68 tools can also be done directly with `execute_blender_code` (which gives full `bpy` Python access). The specialized tools exist for three reasons: they provide **structured, validated** inputs the AI can use reliably; they implement **complex operations** (like BVH assembly analysis or multi-view screenshots) that would be verbose to write from scratch each time; and they are useful for **learning** how specific Blender operations work.
+> **Raw Python is a separate high-risk capability.** `execute_blender_code`, text-block execution, and the legacy alias run unrestricted Python with the Blender user's authority. They are denied in Safe Mode and remain denied in Full Structured Mode until **Allow Raw Python** is explicitly enabled.
 
-> **Note on tool errors.** Some tools may return errors in certain Blender states (e.g. sculpt tools require an active mesh in sculpt mode, render tools require a camera). The AI may also occasionally call a tool with slightly wrong parameters — this is normal. The parameter validator will coerce or reject bad values with a clear error message, and the AI will self-correct on the next attempt. If a tool consistently fails, `execute_blender_code` can usually accomplish the same thing directly.
+> **Asset safety status.** Foundation 0 is not complete. Use disposable `.blend` copies: filesystem roots, external integrations, provider-secret migration, mutation reconciliation, and live Blender validation remain open.
+
+---
+
+## Fork Direction
+
+This fork is hardening the command lifecycle and local trust boundary before expanding the character-authoring tool surface. Start with the [roadmap](ROADMAP.md), [architecture assessment](docs/ARCHITECTURE.md), [security invariant registry](docs/SECURITY_INVARIANTS.md), [protocol contract](docs/PROTOCOL.md), and [retained security scan](docs/security/SECURITY_SCAN_2026-09-09.md). Architectural decisions are recorded in [`docs/adr/`](docs/adr/).
+
+Until the command lifecycle and authorization milestones are complete, use disposable copies of valuable `.blend` files for agent-driven mutations.
 
 ---
 
@@ -41,14 +49,15 @@ Claude / AI Agent
 stdio_bridge.py              ← MCP bridge  [standard Python, runs outside Blender]
        │                       · Validates JSON schemas before forwarding
        │                       · Caches tool list from Blender on first connect
-       │  TCP localhost:9879  (4-byte Big-Endian length-prefix + JSON body)
+       │  authenticated TCP localhost:9879
+       │  protocol-v1 envelope + bounded length-prefix JSON
        ▼
 Blender Addon                ← blender_mcp/__init__.py  [runs inside Blender]
   ├── dispatcher.py            Command router + handler registry (HANDLER_REGISTRY)
   ├── handlers/                52 handler modules (manage_*.py)
   │     manage_scene_comprehension.py   11-action scene intelligence suite
   │     manage_rendering.py             Render, screenshot, view control
-  │     manage_scripting.py             execute_blender_code (safe eval)
+  │     manage_scripting.py             unrestricted Python (separately gated)
   │     polyhaven / sketchfab / hunyuan / hyper3d  (4 external integrations)
   └── core/
         protocol.py           Wire protocol (4-byte header + JSON)
@@ -57,7 +66,7 @@ Blender Addon                ← blender_mcp/__init__.py  [runs inside Blender]
         parameter_validator.py Type coercion + JSON schema validation
         intent_router.py      Multi-language intent classification (EN/TR/FR)
         semantic_memory.py    Tag-based object resolution
-        security.py           High Mode / Safe Mode toggle
+        security.py           capability policy / Safe Mode
         job_manager.py        Async subprocess + internal job queue
 ```
 
@@ -76,7 +85,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed diagrams.
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Platform** | Windows / macOS / Linux | All three are supported — the MCP protocol and wire format are platform-agnostic |
+| **Platform** | Windows validated | macOS/Linux are design targets but require CI and live Blender validation |
 | [Blender](https://www.blender.org/download/) | **5.0 or later** | Must be installed and running locally |
 | [Python](https://www.python.org/downloads/) | **3.10 or later** | For the MCP bridge (outside Blender) |
 | [uv](https://docs.astral.sh/uv/getting-started/installation/) | latest | Recommended — fast, isolated environments |
@@ -87,7 +96,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed diagrams.
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/glonorce/Blender_mcp.git
+git clone https://github.com/gmoddev/Blender_mcp.git
 cd Blender_mcp
 ```
 
@@ -102,7 +111,7 @@ uv sync --all-extras
 
 # Verify everything works (no Blender needed for tests)
 uv run pytest tests/unit -q
-# → 499 passed in ~1.4s
+# → 535 passed in ~1.6s
 ```
 
 `uv sync` creates `.venv/` in the project directory — your system Python stays clean.
@@ -140,8 +149,12 @@ Blender → Edit → Preferences → Add-ons → Install
   → enable "Blender MCP"
 ```
 
-The addon starts a TCP server on port **9879** automatically.
-Verify: press **N** in the 3D Viewport → **MCP** tab → status should show `Listening on :9879`.
+In Blender Addon Preferences, use **Generate / Rotate Credential** to create the required 256-bit
+base64url token. Copy that exact value to `BLENDER_MCP_AUTH_TOKEN` in the MCP client configuration.
+Do not invent a password: manually chosen tokens are rejected. Then press **N** in the 3D Viewport
+→ **MCP** → **Connect to MCP server**. The server refuses to start without a valid credential and
+binds to loopback only. Addon Preferences are authoritative for the Blender server; the environment
+variable is only its fallback, so a rotated preference cannot silently revert after restart.
 
 ---
 
@@ -164,6 +177,7 @@ Replace `<path-to-blender-mcp>` with the absolute path where you cloned this rep
       "env": {
         "BLENDER_HOST": "localhost",
         "BLENDER_PORT": "9879",
+        "BLENDER_MCP_AUTH_TOKEN": "<same-credential-as-Blender-preferences>",
         "MCP_TRANSPORT": "stdio",
         "PYTHONPATH": "<path-to-blender-mcp>"
       }
@@ -186,6 +200,7 @@ Replace `<path-to-blender-mcp>` with the absolute path where you cloned this rep
       "env": {
         "BLENDER_HOST": "localhost",
         "BLENDER_PORT": "9879",
+        "BLENDER_MCP_AUTH_TOKEN": "<same-credential-as-Blender-preferences>",
         "MCP_TRANSPORT": "stdio",
         "PYTHONPATH": "<path-to-blender-mcp>"
       }
@@ -209,6 +224,7 @@ enabled = true
 [mcp_servers.blender.env]
 BLENDER_HOST = "localhost"
 BLENDER_PORT = "9879"
+BLENDER_MCP_AUTH_TOKEN = "<same-credential-as-Blender-preferences>"
 MCP_TRANSPORT = "stdio"
 PYTHONPATH = "<path-to-blender-mcp>"
 ```
@@ -279,7 +295,7 @@ Tool: get_server_status
 
 | Pri | Tool | Purpose |
 |-----|------|---------|
-| 1 | [`execute_blender_code`](#-execute_blender_code) | Full `bpy` Python API — the primary tool for everything |
+| 1 | [`execute_blender_code`](#-execute_blender_code) | Unrestricted `bpy` Python — denied unless Raw Code Mode is explicitly enabled |
 | 2 | [`get_scene_graph`](#-get_scene_graph) | 11-action scene intelligence suite |
 | 3 | [`get_viewport_screenshot_base64`](#-get_viewport_screenshot_base64) | Visual verification — see what Blender sees |
 | 4 | `get_object_info` | Deep object inspector — modifiers, constraints, animation |
@@ -293,9 +309,12 @@ Tool: get_server_status
 
 ### ⚡ execute_blender_code
 
-The primary and most powerful tool. Executes arbitrary Python with full `bpy` access inside Blender.
+The most powerful and highest-risk tool. It executes arbitrary Python with full `bpy`, Python
+builtins, filesystem, process, and network authority inside Blender. Safe Mode and Full Structured
+Mode deny it; use only after explicitly enabling Raw Code Mode.
 
-> **Note:** Almost all of the other 68 tools are essentially wrappers around things you can also do with `execute_blender_code`. The specialized tools add structured validation, complex analysis algorithms, and clear action names — which makes them more reliable and readable for AI agents. But for one-off operations or learning what `bpy` can do, `execute_blender_code` is often the fastest path.
+> **Not a sandbox:** the render-expression guard below addresses one availability bug only. It does
+> not restrict what Python can do. Prefer audited structured actions whenever possible.
 
 **One hardcoded guard:** `bpy.ops.render.render()` is always blocked — it freezes Blender's main thread for the entire render duration, making the MCP unresponsive. Use `manage_rendering action=RENDER_FRAME` instead (async subprocess).
 
@@ -418,37 +437,26 @@ All `bpy` calls from the TCP socket thread are automatically marshalled to Blend
 
 ## Testing
 
-Tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock`.
+Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock`. The live
+integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 499 unit tests, ~1.4s
-uv run pytest tests -v --tb=short        # Full suite
+uv run pytest tests/unit -q              # 535 unit tests, ~1.6s
+uv run pytest --collect-only -q          # 583 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
 ```
 
 <details>
-<summary>Coverage map — 17 test files</summary>
+<summary>Coverage map — 20 unit test files</summary>
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
-| 8 ESSENTIAL handlers | `test_essential_tools.py` | 183 |
-| `core/parameter_validator.py` | `test_parameter_validator.py` | 60 |
-| `core/intent_router.py` | `test_intent_router.py` | 35 |
-| `core/execution_engine.py` | `test_execution_engine.py` | 31 |
-| `dispatcher.py` | `test_dispatcher_deep.py` + `test_dispatch_routing.py` | 51 |
-| `core/semantic_memory.py` | `test_semantic_memory.py` | 25 |
-| `core/job_manager.py` | `test_job_manager.py` | 25 |
-| `core/response_builder.py` | `test_response_builder.py` | 21 |
-| `core/protocol.py` | `test_protocol.py` | 17 |
-| `core/error_protocol.py` | `test_error_protocol.py` | 13 |
-| Project structure | `test_smoke.py` | 10 |
-| MCP bridge validation | `test_engine.py` | 9 |
-| `handlers/manage_history.py` | `test_manage_history.py` | 9 |
-| `core/security.py` | `test_security.py` | 6 |
-| Geometry center computation | `test_scene_graph_geo_center.py` | 6 |
-| **Total** | **17 test files** | **499** |
+| Protocol, authentication, transport, policy, and privacy | 5 files | 57 |
+| Dispatcher and bridge routing/validation | 3 files | 57 |
+| Existing handlers and core behavior | 12 files | 421 |
+| **Total** | **20 test files** | **535** |
 
 </details>
 
@@ -568,7 +576,7 @@ Blender_mcp/
 │       ├── parameter_validator.py   Type coercion + schema validation
 │       ├── intent_router.py         Multi-language intent classification
 │       ├── semantic_memory.py       Tag-based object resolution
-│       ├── security.py              High Mode / Safe Mode
+│       ├── security.py              Capability authorization / Safe Mode
 │       ├── job_manager.py           Async subprocess queue
 │       ├── response_builder.py      Structured response format
 │       └── error_protocol.py        280+ ErrorCode enum values
@@ -590,8 +598,8 @@ Blender_mcp/
 │       ├── check_tool_groups.py     Tool group integrity
 │       └── lint_imports.py          Import architecture rules
 ├── tests/
-│   ├── unit/                        499 unit tests (17 files, no Blender needed)
-│   ├── integration/                 24 mock + live integration tests
+│   ├── unit/                        535 unit tests (20 files, no Blender needed)
+│   ├── integration/                 48 collected mock + live integration cases
 │   └── TESTS.md                     Test suite documentation
 ├── docs/
 │   └── ARCHITECTURE.md              System design, wire protocol, thread model
@@ -610,7 +618,7 @@ Blender_mcp/
 1. Use `@register_handler` decorator on all handlers — no exceptions
 2. `@ensure_main_thread` on any handler that calls `bpy`
 3. No `bpy.types.SimpleNamespace` — not available in Blender 5.x
-4. No `eval`/`exec` outside the `execute_blender_code` security layer
+4. Raw Python routes are explicitly classified `EXECUTE_CODE` and separately authorized
 5. Use `MCPLogger` / `get_logger()` instead of `print()`
 6. Run `make check` before committing — all 12 checks must pass
 7. Add unit tests for new logic in `tests/unit/`
