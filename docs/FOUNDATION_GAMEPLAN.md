@@ -69,6 +69,33 @@ main-thread execution, and shutdown timer cleanup. Its ledger is process-local a
 evicted or restart-lost ID is unknown, never proof that retry is safe. Direct provider timer
 callbacks remain outside this lifecycle and require separate job identity.
 
+## Third Implementation Slice: Foundation 0E/0F Hunyuan containment
+
+The first external-boundary slice removes the currently reachable Hunyuan file-disclosure, SSRF,
+unbounded-download, unsafe-archive, and detached-timer paths without pretending the missing shared
+foundations already exist:
+
+- `integration_hunyuan.STATUS` is explicitly `READ` and reports configured state separately from
+  operational availability.
+- `GENERATE`, `CHECK_JOB`, and `IMPORT` declare their real network, credential, filesystem, read,
+  and mutation capabilities. The dispatcher denies those dedicated capabilities in every current
+  mode.
+- The handler independently returns `EXTERNAL_CAPABILITY_DISABLED` for external actions, before
+  file, network, temporary-file, archive, timer, or Blender import work.
+- The unsafe private request, local-file upload, download/extraction, signing, and detached import
+  implementations are removed instead of being retained as callable bypasses. Legacy module names
+  are purged during add-on reload, and deployment requires a Blender restart to invalidate any
+  callback or function reference captured by the retired code.
+- Unit tests prove denial in Safe, Full Structured, and Raw Code configurations, including direct
+  handler calls, reload residue, prohibited sink use, and representative
+  local-file/loopback/IPv6/userinfo/protocol-relative inputs.
+
+This is containment, not completion of 0E/0F. Hunyuan remains deliberately unavailable until the
+re-enable gate in `docs/EXTERNAL_INTEGRATIONS.md` is met. The next roadmap work is the shared
+filesystem authority boundary (0E), followed by the purpose-scoped network/download/archive client
+(0F), OS-backed provider credentials (0G), and provider jobs that preserve the original MCP request
+identity across off-main-thread preparation and main-thread commit.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

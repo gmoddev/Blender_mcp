@@ -4,6 +4,14 @@ External integrations are untrusted network and content boundaries. Existing Hun
 Sketchfab, and Poly Haven handlers are not approved for valuable or confidential assets until
 Foundation 0F/0G is complete.
 
+Hunyuan `GENERATE`, `CHECK_JOB`, and `IMPORT` are currently quarantined at both the dispatcher and
+handler boundaries. `STATUS` remains read-only and reports configuration separately from
+operational availability. This containment removes the old callable sinks; it does not authorize
+or approximate the target controls below.
+
+Deploying the containment requires a Blender restart. Module reload purges retired Hunyuan names,
+but cannot revoke a callback or function reference that old code already captured.
+
 ## Target Controls
 
 - Explicit, user-controlled provider enablement and capability authorization.
@@ -24,3 +32,9 @@ Foundation 0F/0G is complete.
 Each provider stays untrusted until its complete source-to-sink path uses the shared controls and
 passes SSRF, redirect, timeout, oversize, archive traversal/expansion, cleanup, local-file consent,
 and credential-serialization tests. Hiding a handler or checking a UI toggle is not a permanent fix.
+
+Hunyuan additionally requires an evidence-backed provider contract: fixed purpose-specific
+endpoints or provider asset identifiers, documented redirect behavior, response/archive formats,
+and safe resource budgets. Its provider job must retain the initiating MCP request ID through
+off-main-thread preparation and bounded main-thread commit, check native import results, and expose
+truthful terminal/reconciliation state.

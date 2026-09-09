@@ -23,6 +23,8 @@ means the invariant is required but not yet proven by the current implementation
 | PRIV-002 | No telemetry leaves the process and telemetry is not enabled or implied by default. | Static scan and network-isolation test. | Target |
 | SUPPLY-001 | Runtime code never silently replaces itself from a remote branch. Updates are explicit and artifacts are pinned. | Static scan and release tests. | Target |
 | INPUT-001 | Untrusted lengths, paths, URLs, schemas, and imported asset metadata are bounded and validated before use. | Boundary and traversal tests. | Partial |
+| EXT-001 | Hunyuan external actions cannot perform file, network, archive, timer, credential, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, and bypass-input tests. | Enforced by quarantine after Blender restart; provider functionality intentionally unavailable |
+| EXT-002 | External-integration status distinguishes saved configuration from operational availability and performs no external I/O. | Safe Mode status and truthful-field assertions. | Enforced for Hunyuan |
 | ERROR-001 | Boundary failures return structured, redacted errors without modal or focus-stealing UI. | UI behavior review and error-contract tests. | Partial: protocol/auth structured; live UI pending |
 | REC-001 | After disconnect or indeterminate completion, a client can query execution state and reconcile scene state before retrying. | Disconnect/reconnect integration test. | Partial: live in-process reconnect/reconciliation enforced; process restart and direct callbacks remain unknown |
 | LIC-001 | Copied or adapted code retains required copyright and license notices with provenance. | Release checklist and dependency/source inventory. | Target |
@@ -37,6 +39,10 @@ means the invariant is required but not yet proven by the current implementation
 - `blender_mcp/handlers/manage_scripting.py`: raw execution receives normal Python builtins.
 - Provider credentials remain ordinary Scene properties and temporary render copies still need
   deterministic secret scrubbing and cleanup.
+- Hunyuan external actions are quarantined at dispatcher and handler boundaries. Restoring them
+  requires the 0E-0G controls and provider-job lifecycle in ADR 0005; other provider paths remain
+  unaudited. Deploying the quarantine requires a Blender restart to invalidate callbacks captured
+  by the retired implementation.
 - The primary bridge/server/dispatcher log path is metadata-only; provider and job logging still
   require a repository-wide canary audit.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
