@@ -196,10 +196,13 @@ class BlenderMCPServer:
 
         try:
             from .core.session import ValidateAuthToken
+            from .core.thread_safety import ThreadSafety
 
             self.AuthToken = ValidateAuthToken(self.GetAuthToken())
             if not self.IsLoopbackHost(self.host):
                 raise ValueError("Remote binding is disabled; use a loopback host")
+            if not getattr(bpy, "is_mock", False) and not ThreadSafety().Start():
+                raise RuntimeError("Blender main-thread command queue failed to start")
             self.InstanceId = str(uuid.uuid4())
             self.AuthEpoch += 1
 

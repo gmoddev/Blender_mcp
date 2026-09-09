@@ -48,6 +48,81 @@ def WaitForQueue(Lifecycle: ThreadSafety) -> None:
 
 
 class TestCommandLifecycle:
+    def test_worker_cannot_register_blender_timer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ThreadSafety._instance = None
+        ThreadSafety._initialized = False
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", False)
+        Lifecycle = ThreadSafety()
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", True)
+        monkeypatch.setattr(ThreadSafetyModule, "is_main_thread", lambda: False)
+        Register = MagicMock()
+        monkeypatch.setattr(ThreadSafetyModule.bpy.app.timers, "register", Register)
+
+        assert Lifecycle.Start() is False
+        assert Lifecycle._ensure_timer() is False
+        Register.assert_not_called()
+
+    def test_main_thread_start_registers_timer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ThreadSafety._instance = None
+        ThreadSafety._initialized = False
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", False)
+        Lifecycle = ThreadSafety()
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", True)
+        monkeypatch.setattr(ThreadSafetyModule, "is_main_thread", lambda: True)
+        RegisterHealth = MagicMock()
+        Register = MagicMock()
+        monkeypatch.setattr(Lifecycle, "_register_health_monitors", RegisterHealth)
+        monkeypatch.setattr(ThreadSafetyModule.bpy.app.timers, "register", Register)
+
+        assert Lifecycle.Start() is True
+        RegisterHealth.assert_called_once_with()
+        Register.assert_called_once_with(
+            Lifecycle._TimerCallback,
+            first_interval=0.001,
+            persistent=True,
+        )
+
+    def test_worker_shutdown_does_not_call_blender_timer_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ThreadSafety._instance = None
+        ThreadSafety._initialized = False
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", False)
+        Lifecycle = ThreadSafety()
+        Lifecycle._timer_registered = True
+        monkeypatch.setattr(ThreadSafetyModule, "BPY_AVAILABLE", True)
+        monkeypatch.setattr(ThreadSafetyModule, "is_main_thread", lambda: False)
+        IsRegistered = MagicMock()
+        Unregister = MagicMock()
+        monkeypatch.setattr(ThreadSafetyModule.bpy.app.timers, "is_registered", IsRegistered)
+        monkeypatch.setattr(ThreadSafetyModule.bpy.app.timers, "unregister", Unregister)
+
+        Lifecycle.Shutdown()
+
+        IsRegistered.assert_not_called()
+        Unregister.assert_not_called()
+        assert Lifecycle._timer_registered is True
+
+    def test_background_monitor_does_not_call_blender_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        Lifecycle = GetLifecycle(monkeypatch)
+        IsJobRunning = MagicMock()
+        monkeypatch.setattr(ThreadSafetyModule.bpy.app, "is_job_running", IsJobRunning)
+        Lifecycle._last_main_thread_tick = time.time() - 31.0
+        Lifecycle._last_depsgraph_update = time.time() - 31.0
+
+        Lifecycle._check_logical_stall()
+
+        IsJobRunning.assert_not_called()
+
+    def test_idle_timer_interval_stays_below_minimum_dispatch_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        Lifecycle = GetLifecycle(monkeypatch)
+
+        assert Lifecycle._process_queue() < 0.1
+
     def test_pending_timeout_tombstones_callable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         Lifecycle = GetLifecycle(monkeypatch)
         Invocations: list[str] = []

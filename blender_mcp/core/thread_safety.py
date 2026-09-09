@@ -75,6 +75,7 @@ MAX_LEDGER_ENTRIES = 4096
 LEDGER_RETENTION_SECONDS = 15 * 60.0
 MAX_RETAINED_RESULT_BYTES = 4 * 1024 * 1024
 MAX_LEDGER_RESULT_BYTES = 32 * 1024 * 1024
+IDLE_TIMER_INTERVAL_SECONDS = 0.05
 
 
 def _NoOp() -> None:
@@ -271,7 +272,6 @@ class ThreadSafety:
             return
 
         self._initialized = True
-        self._initialized = True
         self._task_queue: queue.Queue[MCPCommand] = queue.Queue()
         self._active_tasks: Dict[str, MCPCommand] = {}
         self._request_ledger: OrderedDict[str, MCPCommand] = OrderedDict()
@@ -282,6 +282,7 @@ class ThreadSafety:
         self._MaxLedgerResultBytes = MAX_LEDGER_RESULT_BYTES
         self._LedgerResultBytes = 0
         self._timer_registered = False
+        self._TimerCallback = self._process_queue
         self._stats = {
             "total_executed": 0,
             "total_failed": 0,
@@ -293,11 +294,35 @@ class ThreadSafety:
         self._last_main_thread_tick: float = time.time()
         self._stop_monitor = threading.Event()
 
+    def Start(self) -> bool:
+        """Register Blender-owned callbacks from Blender's main thread."""
+        if not BPY_AVAILABLE:
+            return False
+        if not is_main_thread():
+            logger.error("[BlenderMCP:CommandQueue] Startup rejected outside Blender's main thread")
+            return False
+
         self._register_health_monitors()
+        if self._timer_registered:
+            try:
+                if bpy.app.timers.is_registered(self._TimerCallback):
+                    return True
+            except Exception as Error:
+                logger.error(
+                    "[BlenderMCP:CommandQueue] Timer state check failed "
+                    f"error_type={type(Error).__name__}"
+                )
+            self._timer_registered = False
+        return self._ensure_timer()
 
     def _register_health_monitors(self) -> None:
         """Register Blender handlers for health monitoring."""
         if not BPY_AVAILABLE:
+            return
+        if not is_main_thread():
+            logger.error(
+                "[BlenderMCP:Health] Handler registration rejected outside Blender's main thread"
+            )
             return
 
         # Track Depsgraph Updates (Scene changes)
@@ -343,35 +368,19 @@ class ThreadSafety:
             time.sleep(5.0)
             try:
                 self._check_logical_stall()
-            except Exception as e:
-                print(f"[MCP-Monitor] Error: {e}")
+            except Exception as Error:
+                logger.error(
+                    f"[BlenderMCP:Health] Monitor failed error_type={type(Error).__name__}"
+                )
 
     def _check_logical_stall(self) -> None:
         """
-        Composite Watchdog Logic.
-        Triangulates: Time + Depsgraph + Job Status.
+        Compare timestamps written by Blender main-thread callbacks.
         """
         if not BPY_AVAILABLE:
             return
 
-        # Explicitly check for job state to avoid thread race conditions
-        is_job_running = False
-        try:
-            # Split to avoid multi-line ignore issues with formatter
-            check_render = bpy.app.is_job_running("RENDER")
-
-            check_bake = bpy.app.is_job_running("OBJECT_BAKE")
-
-            is_job_running = check_render or check_bake
-        except:
-            pass
-
         now = time.time()
-        # If job is running, we consider the main thread "alive" even if not ticking
-        if is_job_running:
-            self._last_main_thread_tick = now  # Fake tick to Prevent alarm
-            return
-
         tick_delta = now - self._last_main_thread_tick
         deps_delta = now - self._last_depsgraph_update
 
@@ -379,10 +388,11 @@ class ThreadSafety:
         THRESHOLD = 30.0
 
         if tick_delta > THRESHOLD and deps_delta > THRESHOLD:
-            logger.warning("⚠️ [MCP-Health] LOGICAL STALL DETECTED!")
-            logger.warning(f"   - Main Thread Silence: {tick_delta:.2f}s")
-            logger.warning(f"   - Depsgraph Silence: {deps_delta:.2f}s")
-            logger.debug("   - No Active Render/Bake Job Detected")
+            logger.warning(
+                "[BlenderMCP:Health] Logical stall detected "
+                f"main_thread_silence_seconds={tick_delta:.2f} "
+                f"depsgraph_silence_seconds={deps_delta:.2f}"
+            )
 
     def _ensure_timer(self) -> bool:
         """
@@ -395,15 +405,16 @@ class ThreadSafety:
             return False
 
         if self._timer_registered:
-            try:
-                if bpy.app.timers.is_registered(self._process_queue):
-                    return True
-            except:
-                pass
+            return True
+        if not is_main_thread():
+            logger.error(
+                "[BlenderMCP:CommandQueue] Timer registration rejected outside Blender's main thread"
+            )
+            return False
 
         try:
             bpy.app.timers.register(
-                self._process_queue,
+                self._TimerCallback,
                 first_interval=0.001,  # 1ms initial delay
                 persistent=True,
             )
@@ -458,7 +469,7 @@ class ThreadSafety:
         # Return interval based on queue state
         if not self._task_queue.empty():
             return 0.001  # Keep processing
-        return 1.0  # 1fps when idle — reduces continuous GPU/CPU polling
+        return IDLE_TIMER_INTERVAL_SECONDS
 
     @classmethod
     def execute_on_main(
@@ -698,9 +709,14 @@ class ThreadSafety:
                 self._active_tasks.pop(Command.id, None)
 
         if BPY_AVAILABLE and self._timer_registered:
+            if not is_main_thread():
+                logger.error(
+                    "[BlenderMCP:CommandQueue] Timer shutdown rejected outside Blender's main thread"
+                )
+                return
             try:
-                if bpy.app.timers.is_registered(self._process_queue):
-                    bpy.app.timers.unregister(self._process_queue)
+                if bpy.app.timers.is_registered(self._TimerCallback):
+                    bpy.app.timers.unregister(self._TimerCallback)
             except Exception as Error:
                 logger.error(
                     "[BlenderMCP:CommandQueue] Timer shutdown failed "
