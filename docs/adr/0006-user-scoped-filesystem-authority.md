@@ -34,6 +34,8 @@ Authorize the final concrete path immediately before the file sink:
 7. reject caller-supplied path/output-family exporter settings; allow only single-file GLB, disable
    USD texture sidecars, fix FBX texture path mode to `STRIP`, and quarantine asset packing until all
    external inputs can receive explicit read grants.
+8. authorize sequencer media before creating its editor and quarantine preview rendering until all
+   frame-derived outputs can be enumerated and authorized.
 
 Grant `FILESYSTEM_READ` and `FILESYSTEM_WRITE` only when the corresponding validated root exists.
 Safe Mode may combine `READ` with `FILESYSTEM_READ`, but it never gains `MUTATE` or filesystem

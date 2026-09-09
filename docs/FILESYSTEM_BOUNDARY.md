@@ -31,6 +31,7 @@ The first migrated source-to-sink family covers:
 - scene `.blend` open, explicit save, and save-to-current-file;
 - standard, pipeline, batch-variant, and Unity export routes;
 - UV layout export;
+- sequencer movie, sound, and still-image reads;
 - cloud-render current-file saves.
 
 This slice authorizes only exporter outputs whose complete output family is known. glTF writes are
@@ -38,7 +39,8 @@ single-file GLB only. Caller-supplied exporter settings cannot select paths or o
 texture path mode is fixed to `STRIP`, and USD texture export/overwrite is forced off. Cloud asset
 packaging and SheepIt preparation are quarantined because Blender's pack operation can read every
 linked external asset; they remain disabled until each input can be enumerated and granted read
-authority before mutation.
+authority before mutation. Sequencer preview rendering is likewise quarantined because animation
+rendering derives a multi-file output family from mutable scene settings.
 
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
@@ -54,7 +56,7 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Rendering outputs, viewport captures, sequencer media, imported assets, caches, temporary provider
+Rendering outputs, viewport captures, other imported assets, caches, temporary provider
 artifacts, subprocess paths, and other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and

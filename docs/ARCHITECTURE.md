@@ -88,6 +88,8 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   user-scoped path authority. Multi-file glTF and USD texture sidecars are disabled, and external
   asset packing is quarantined pending read grants, but remaining file/network handlers, other
   sidecars, and string-path TOCTOU prevent valuable-asset readiness.
+- Sequencer media inputs are authorized before editor creation. Sequencer preview rendering is
+  disabled until its frame-derived output family can be authorized as a unit.
 
 ## Reference-Repositories Assessment
 

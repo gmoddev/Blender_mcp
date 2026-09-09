@@ -52,6 +52,8 @@ means the invariant is required but not yet proven by the current implementation
   read grants. Other file surfaces, sidecars, atomic publication, supported POSIX behavior, and
   broader live Blender operators remain Foundation 0E work. Blender 5.2.1 passes its disposable
   file-operator harness.
+- Sequencer media reads require a configured read root and action-specific media type before the
+  editor is created. Preview rendering is quarantined until its derived output family is explicit.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
 - `pyproject.toml` and `LICENSE`: package metadata disagrees about the license.
 

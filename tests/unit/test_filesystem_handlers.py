@@ -14,6 +14,7 @@ from blender_mcp.core.enums import (
     CloudRenderAction,
     ExportAction,
     SceneAction,
+    SequencerAction,
     UVsAction,
 )
 from blender_mcp.core.export_pipeline import ExportValidator, GLTFExporter, USDExporter
@@ -30,6 +31,7 @@ from blender_mcp.handlers import manage_cloud_render as CloudRenderModule
 from blender_mcp.handlers import manage_export as StandardExportModule
 from blender_mcp.handlers import manage_export_pipeline as ExportPipelineModule
 from blender_mcp.handlers import manage_scene as SceneModule
+from blender_mcp.handlers import manage_sequencer as SequencerModule
 from blender_mcp.handlers import manage_uvs as UVModule
 from blender_mcp.handlers import unity_export as UnityModule
 import blender_mcp.core.export_pipeline as ExportCoreModule
@@ -390,6 +392,72 @@ def test_cloud_packaging_is_quarantined_and_optimization_does_not_pack_assets(
     Save.assert_called_once_with(filepath=str(ScenePath.resolve()))
 
 
+def test_sequencer_denies_media_path_before_editor_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ReadRoot = tmp_path / "media"
+    ReadRoot.mkdir()
+    Outside = tmp_path / "outside.mp4"
+    Outside.write_bytes(b"media")
+    ConfigureFilesystemPolicy(ReadRoot=ReadRoot)
+    EnsureEditor = MagicMock(side_effect=AssertionError("editor should not be created"))
+    monkeypatch.setattr(SequencerModule, "_ensure_sequencer_editor", EnsureEditor)
+
+    Result = SequencerModule.manage_sequencer(
+        action=SequencerAction.ADD_MOVIE.value,
+        filepath=str(Outside),
+    )
+
+    assert Result["success"] is False
+    assert ErrorCode(Result) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    EnsureEditor.assert_not_called()
+
+
+def test_sequencer_media_read_preserves_inside_root_behavior(tmp_path: Path) -> None:
+    Media = tmp_path / "clip.mp4"
+    Media.write_bytes(b"media")
+    ConfigureFilesystemPolicy(ReadRoot=tmp_path)
+    Strip = SimpleNamespace(
+        name="clip.mp4",
+        type="MOVIE",
+        channel=1,
+        frame_start=1,
+        frame_final_duration=24,
+    )
+    NewMovie = MagicMock(return_value=Strip)
+    Editor = SimpleNamespace(sequences=SimpleNamespace(new_movie=NewMovie))
+
+    Result = SequencerModule._handle_add_movie(
+        Editor,
+        {"filepath": str(Media), "channel": 1, "frame_start": 1},
+    )
+
+    assert Result["success"] is True
+    NewMovie.assert_called_once_with(
+        name="clip.mp4",
+        filepath=str(Media.resolve()),
+        channel=1,
+        frame_start=1,
+    )
+
+
+def test_sequencer_preview_output_family_is_quarantined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    EnsureEditor = MagicMock(side_effect=AssertionError("editor should not be created"))
+    monkeypatch.setattr(SequencerModule, "_ensure_sequencer_editor", EnsureEditor)
+
+    Result = SequencerModule.manage_sequencer(
+        action=SequencerAction.RENDER_PREVIEW.value,
+        filepath="preview_####",
+    )
+
+    assert Result["success"] is False
+    assert ErrorCode(Result) == "OUTPUT_FAMILY_DISABLED"
+    EnsureEditor.assert_not_called()
+
+
 def test_filesystem_routes_declare_capabilities() -> None:
     assert HANDLER_METADATA["manage_scene"]["capabilities"][SceneAction.OPEN_FILE.value] == [
         Capability.MUTATE.value,
@@ -408,6 +476,12 @@ def test_filesystem_routes_declare_capabilities() -> None:
     ]
     assert HANDLER_METADATA["manage_cloud_render"]["capabilities"][
         CloudRenderAction.PACKAGE_ASSETS.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+    assert HANDLER_METADATA["manage_sequencer"]["capabilities"][
+        SequencerAction.ADD_MOVIE.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
+    assert HANDLER_METADATA["manage_sequencer"]["capabilities"][
+        SequencerAction.RENDER_PREVIEW.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
     for ToolName in ("export_unity_fbx", "export_unity_collection", "export_lod_chain"):
         assert HANDLER_METADATA[ToolName]["capabilities"][ToolName] == [

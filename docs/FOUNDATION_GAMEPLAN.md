@@ -113,11 +113,24 @@ path-bearing exporter settings are rejected. Cloud asset packaging is quarantine
 inputs can be enumerated and authorized for read before Blender packs them.
 
 This is not completion of 0E. Blender's string-path APIs retain a local TOCTOU window, and rendering,
-captures, sequencer media, imports, caches, provider artifacts, subprocess paths, and remaining
-sidecars still need a complete sink and capability audit. Blender 5.2.1 passes the disposable open/save/export,
+captures, imports, caches, provider artifacts, subprocess paths, and remaining sidecars still need a
+complete sink and capability audit. Blender 5.2.1 passes the disposable open/save/export,
 overwrite-sentinel, and Windows-junction checks; supported POSIX remains pending. The effective
-contract and limitations are in `docs/FILESYSTEM_BOUNDARY.md` and ADR 0006. Next is completion of
-the remaining file surfaces before 0F network/download/archive work.
+contract and limitations are in `docs/FILESYSTEM_BOUNDARY.md` and ADR 0006. Next is completion of the
+remaining file surfaces before 0F network/download/archive work.
+
+## Fifth Implementation Slice: Foundation 0E sequencer media authority
+
+Sequencer movie, sound, and still-image actions now require `FILESYSTEM_READ`, authorize an existing
+regular input with an action-specific extension before Blender creates a sequence editor, and
+reauthorize in the direct handler before the media sink. Denials therefore cannot mutate the scene
+as a side effect of validation. Sequencer error logs no longer include arbitrary Blender exception
+text or caller paths.
+
+`RENDER_PREVIEW` is quarantined at both the registered route and direct helper because Blender can
+derive multiple filenames from the current render format, frame range, and path template. Re-enable
+it only after the full output family is enumerated, authorized, and tested for overwrite behavior.
+This remains partial 0E; the next slice is the broader rendering/capture family.
 
 ### Milestone 0: Baseline and scan readiness
 

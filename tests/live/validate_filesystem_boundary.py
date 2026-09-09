@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 from pathlib import Path
@@ -26,6 +27,7 @@ from blender_mcp.core.filesystem_boundary import (  # noqa: E402
     ResetFilesystemPolicy,
 )
 from blender_mcp.handlers.manage_scene import _handle_open_file, _handle_save_file  # noqa: E402
+from blender_mcp.handlers.manage_sequencer import _get_sequences, manage_sequencer  # noqa: E402
 
 
 def _ErrorCode(Result: dict) -> str:
@@ -85,6 +87,28 @@ try:
     if not InsideExport.get("success") or not ExpectedExport.is_file():
         raise AssertionError(f"approved export failed: {InsideExport}")
 
+    PixelData = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    ReadImage = ReadRoot / "pixel.png"
+    OutsideImage = OutsideRoot / "pixel.png"
+    ReadImage.write_bytes(PixelData)
+    OutsideImage.write_bytes(PixelData)
+    EditorBeforeDenial = bpy.context.scene.sequence_editor
+    HadEditorBeforeDenial = EditorBeforeDenial is not None
+    StripCountBeforeDenial = len(_get_sequences(EditorBeforeDenial))
+    DeniedImage = manage_sequencer(action="ADD_IMAGE", filepath=str(OutsideImage))
+    if _ErrorCode(DeniedImage) != "FILESYSTEM_PATH_OUTSIDE_ROOT":
+        raise AssertionError(f"outside sequencer image returned {DeniedImage}")
+    EditorAfterDenial = bpy.context.scene.sequence_editor
+    HasEditorAfterDenial = EditorAfterDenial is not None
+    StripCountAfterDenial = len(_get_sequences(EditorAfterDenial))
+    if HasEditorAfterDenial != HadEditorBeforeDenial or StripCountAfterDenial != StripCountBeforeDenial:
+        raise AssertionError("denied sequencer import created an editor")
+    ApprovedImage = manage_sequencer(action="ADD_IMAGE", filepath=str(ReadImage))
+    if not ApprovedImage.get("success"):
+        raise AssertionError(f"approved sequencer image failed: {ApprovedImage}")
+
     try:
         ExportValidator.check_path_injection(
             str(OutsideRoot / "force.glb"),
@@ -128,7 +152,7 @@ try:
         raise AssertionError(f"approved open failed: {ApprovedOpen}")
 
     print(
-        "[BlenderMCP:FilesystemLive] PASS root containment, overwrite, export, and open",
+        "[BlenderMCP:FilesystemLive] PASS containment, overwrite, export, open, and sequencer read",
         flush=True,
     )
 finally:

@@ -36,5 +36,6 @@ Run the path-authority checks directly in a disposable background Blender proces
 
 The script creates only a uniquely named directory under the OS temporary directory. It checks
 outside-root save/open/export denial, sentinel preservation, explicit local overwrite approval, an
-approved GLB export, and a Windows junction escape when junction creation is available, then removes
-the temporary directory.
+approved GLB export, denied sequencer import without editor mutation, approved sequencer image
+import, and a Windows junction escape when junction creation is available, then removes the
+temporary directory.

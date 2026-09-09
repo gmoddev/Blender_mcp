@@ -20,23 +20,109 @@ try:
 except ImportError:
     BPY_AVAILABLE = False
 
-from ..core.thread_safety import execute_on_main_thread, ensure_main_thread
+from ..core.thread_safety import ensure_main_thread
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.error_protocol import ErrorProtocol
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.universal_coercion import ParameterNormalizer
 from ..core.enums import SequencerAction, SequencerBlendType
 from ..core.validation_utils import ValidationUtils
 from ..dispatcher import register_handler
+from ..utils.path import get_safe_path
 
 logger = get_logger()
+
+
+VideoExtensions = {
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".mxf",
+    ".m4v",
+    ".mpg",
+    ".mpeg",
+    ".wmv",
+    ".ogv",
+    ".ts",
+    ".mts",
+    ".flv",
+}
+ImageExtensions = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".exr",
+    ".tiff",
+    ".tif",
+    ".bmp",
+    ".tga",
+    ".hdr",
+    ".dpx",
+}
+SoundExtensions = {".wav", ".mp3", ".ogg", ".flac", ".aac", ".m4a", ".wma", ".opus"}
+MediaExtensionsByAction = {
+    SequencerAction.ADD_MOVIE.value: VideoExtensions,
+    SequencerAction.ADD_SOUND.value: SoundExtensions,
+    SequencerAction.ADD_IMAGE.value: ImageExtensions,
+    SequencerAction.ADD_IMAGE_STRIP.value: ImageExtensions,
+}
+SequencerCapabilities = {
+    Action.value: [Capability.MUTATE.value] for Action in SequencerAction
+}
+for MediaAction in MediaExtensionsByAction:
+    SequencerCapabilities[MediaAction] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_READ.value,
+    ]
+SequencerCapabilities[SequencerAction.RENDER_PREVIEW.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
+
+
+def _FilesystemError(Action: str, Error: FilesystemPolicyError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_sequencer",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
+
+
+def _PreflightMediaPath(Action: str, Params: dict[str, Any]) -> dict[str, Any] | None:
+    Extensions = MediaExtensionsByAction.get(Action)
+    if Extensions is None:
+        return None
+    RawPath = Params.get("filepath")
+    if not RawPath:
+        return ResponseBuilder.error(
+            handler="manage_sequencer",
+            action=Action,
+            error_code="MISSING_PARAMETER",
+            message="filepath is required",
+        )
+    try:
+        Params["filepath"] = get_safe_path(
+            RawPath,
+            Access=FilesystemAccess.READ,
+            AllowedExtensions=Extensions,
+            CreateParents=False,
+        )
+    except FilesystemPolicyError as Error:
+        return _FilesystemError(Action, Error)
+    return None
 
 
 @register_handler(
     "manage_sequencer",
     actions=[a.value for a in SequencerAction],
+    capabilities=SequencerCapabilities,
     category="sequencer",
     schema={
         "type": "object",
@@ -101,6 +187,13 @@ def manage_sequencer(action: str | None = None, **params: Any) -> dict[str, Any]
     # Normalize parameters
     params = ParameterNormalizer.normalize(params, manage_sequencer._handler_schema)
 
+    if action == SequencerAction.RENDER_PREVIEW.value:
+        return _handle_render_preview(None, params)
+
+    MediaError = _PreflightMediaPath(str(action), params)
+    if MediaError is not None:
+        return MediaError
+
     # Blender 5.0 separates the VSE scene from the active scene via sequencer_scene.
     # Fall back to bpy.context.scene for older builds.
     scene = getattr(bpy.context, "sequencer_scene", None) or bpy.context.scene
@@ -152,7 +245,7 @@ def manage_sequencer(action: str | None = None, **params: Any) -> dict[str, Any]
                 message=f"Unknown action: {action}",
             )
     except Exception as e:
-        logger.error(f"manage_sequencer.{action} failed: {e}", exc_info=True)
+        logger.error("[BlenderMCP:Sequencer] action failed")
         return ResponseBuilder.error(
             handler="manage_sequencer",
             action=action,
@@ -276,47 +369,10 @@ def _get_strip(seq_editor, name: str):  # type: ignore[no-untyped-def]
 
 def _handle_add_movie(seq_editor: Any, params: dict[str, Any]) -> dict[str, Any]:
     """Handle ADD_MOVIE action with media-kind validation."""
-    from ..utils.path import get_safe_path
-
-    SUPPORTED_VIDEO_FORMATS = {
-        ".mp4",
-        ".mov",
-        ".avi",
-        ".mkv",
-        ".webm",
-        ".mxf",
-        ".m4v",
-        ".mpg",
-        ".mpeg",
-        ".wmv",
-        ".ogv",
-        ".ts",
-        ".mts",
-        ".flv",
-    }
-
-    SUPPORTED_IMAGE_FORMATS = {
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".exr",
-        ".tiff",
-        ".bmp",
-        ".tga",
-        ".hdr",
-        ".dpx",
-    }
-
-    path = params.get("filepath")
-    if not path:
-        return ResponseBuilder.error(
-            handler="manage_sequencer",
-            action=SequencerAction.ADD_MOVIE.value,
-            error_code="MISSING_PARAMETER",
-            message="filepath is required",
-        )
-
-    path = get_safe_path(path)
+    MediaError = _PreflightMediaPath(SequencerAction.ADD_MOVIE.value, params)
+    if MediaError is not None:
+        return MediaError
+    path = params["filepath"]
 
     if not os.path.exists(path):
         return ResponseBuilder.error(
@@ -332,25 +388,14 @@ def _handle_add_movie(seq_editor: Any, params: dict[str, Any]) -> dict[str, Any]
 
     ext = os.path.splitext(path)[1].lower()
 
-    if ext in SUPPORTED_IMAGE_FORMATS:
-        return ResponseBuilder.error(
-            handler="manage_sequencer",
-            action=SequencerAction.ADD_MOVIE.value,
-            error_code="WRONG_ACTION",
-            message=(
-                f"'{ext}' bir görüntü formatı. "
-                f"Lütfen ADD_IMAGE veya ADD_IMAGE_STRIP action'ını kullanın."
-            ),
-        )
-
-    if ext not in SUPPORTED_VIDEO_FORMATS:
+    if ext not in VideoExtensions:
         return ResponseBuilder.error(
             handler="manage_sequencer",
             action=SequencerAction.ADD_MOVIE.value,
             error_code="UNSUPPORTED_FORMAT",
             message=(
                 f"'{ext}' desteklenmiyor. "
-                f"Desteklenen video formatları: {sorted(SUPPORTED_VIDEO_FORMATS)}"
+                f"Desteklenen video formatları: {sorted(VideoExtensions)}"
             ),
         )
 
@@ -404,18 +449,10 @@ def _handle_add_movie(seq_editor: Any, params: dict[str, Any]) -> dict[str, Any]
 
 def _handle_add_sound(seq_editor, params):  # type: ignore[no-untyped-def]
     """Handle ADD_SOUND action."""
-    from ..utils.path import get_safe_path
-
-    path = params.get("filepath")
-    if not path:
-        return ResponseBuilder.error(
-            handler="manage_sequencer",
-            action=SequencerAction.ADD_SOUND.value,
-            error_code=ErrorProtocol.MISSING_PARAMETER,
-            message="filepath is required",
-        )
-
-    path = get_safe_path(path)
+    MediaError = _PreflightMediaPath(SequencerAction.ADD_SOUND.value, params)
+    if MediaError is not None:
+        return MediaError
+    path = params["filepath"]
     chan = max(1, min(32, params.get("channel", 2)))
     start = params.get("frame_start", 1)
 
@@ -457,18 +494,10 @@ def _handle_add_sound(seq_editor, params):  # type: ignore[no-untyped-def]
 
 def _handle_add_image(seq_editor, params):  # type: ignore[no-untyped-def]
     """Handle ADD_IMAGE/ADD_IMAGE_STRIP action."""
-    from ..utils.path import get_safe_path
-
-    path = params.get("filepath")
-    if not path:
-        return ResponseBuilder.error(
-            handler="manage_sequencer",
-            action=SequencerAction.ADD_IMAGE.value,
-            error_code=ErrorProtocol.MISSING_PARAMETER,
-            message="filepath is required",
-        )
-
-    path = get_safe_path(path)
+    MediaError = _PreflightMediaPath(SequencerAction.ADD_IMAGE.value, params)
+    if MediaError is not None:
+        return MediaError
+    path = params["filepath"]
     chan = max(1, min(32, params.get("channel", 1)))
     start = params.get("frame_start", 1)
 
@@ -501,7 +530,7 @@ def _handle_add_image(seq_editor, params):  # type: ignore[no-untyped-def]
                 except TypeError:
                     strip = None
                 except Exception as _api_err:
-                    logger.warning(f"sequences.new_image({_kwargs}) failed: {_api_err}")
+                    logger.warning("[BlenderMCP:Sequencer] image data API failed")
                     strip = None
 
         if strip:
@@ -514,20 +543,19 @@ def _handle_add_image(seq_editor, params):  # type: ignore[no-untyped-def]
             return {"strip_name": strip.name, "type": strip.type, "filepath": norm_path}
 
         # --- Operator fallback (requires SEQUENCE_EDITOR area in UI) ---
-        logger.warning("new_image() data API failed — trying operator fallback")
+        logger.warning("[BlenderMCP:Sequencer] trying image operator fallback")
         directory = os.path.dirname(os.path.abspath(norm_path)).replace("\\", "/")
         if not directory.endswith("/"):
             directory += "/"
         filename = os.path.basename(norm_path)
 
-        op_result = None
         try:
             with ContextManagerV3.temp_override(area_type="SEQUENCE_EDITOR"):
                 # Blender 5.0 (PR#143974): all strip-add operators default to
                 # move_strips=True (modal, waits for mouse). Scripts must pass
                 # move_strips=False to prevent the operator entering modal mode
                 # and returning CANCELLED (or blocking indefinitely).
-                op_result = safe_ops.sequencer.image_strip_add(
+                safe_ops.sequencer.image_strip_add(
                     directory=directory,
                     files=[{"name": filename}],
                     frame_start=start,
@@ -536,7 +564,7 @@ def _handle_add_image(seq_editor, params):  # type: ignore[no-untyped-def]
                     move_strips=False,
                 )
         except Exception as _op_err:
-            logger.error(f"sequencer.image_strip_add operator failed: {_op_err}")
+            logger.error("[BlenderMCP:Sequencer] image operator fallback failed")
 
         sequences = _get_sequences(seq_editor)
         strip = list(sequences)[-1] if sequences else None
@@ -1044,50 +1072,10 @@ def _handle_create_meta_strip(seq_editor, scene, params):  # type: ignore[no-unt
 
 def _handle_render_preview(scene, params):  # type: ignore[no-untyped-def]
     """Handle RENDER_PREVIEW action."""
-    frame_start = params.get("frame_start", scene.frame_start)
-    frame_end = params.get("frame_end", frame_start + 24)
-    resolution_percentage = params.get("resolution_percentage", 50)
-    filepath = params.get("filepath", "//preview_####")
-
-    # Store original settings
-    orig_resolution = scene.render.resolution_percentage
-    orig_start = scene.frame_start
-    orig_end = scene.frame_end
-    orig_filepath = scene.render.filepath
-
-    try:
-        # Set preview settings
-        scene.render.resolution_percentage = resolution_percentage
-        scene.frame_start = int(frame_start)
-        scene.frame_end = int(frame_end)
-        scene.render.filepath = filepath
-
-        # Render animation
-        def render_op():  # type: ignore[no-untyped-def]
-            safe_ops.render.render(animation=True)
-            return True
-
-        execute_on_main_thread(render_op, timeout=600.0)  # 10 min for preview
-
-        return ResponseBuilder.success(
-            handler="manage_sequencer",
-            action=SequencerAction.RENDER_PREVIEW.value,
-            data={
-                "message": f"Rendered preview frames {frame_start}-{frame_end}",
-                "filepath": filepath,
-                "resolution_percentage": resolution_percentage,
-            },
-        )
-    except Exception as e:
-        return ResponseBuilder.error(
-            handler="manage_sequencer",
-            action=SequencerAction.RENDER_PREVIEW.value,
-            error_code=ErrorProtocol.EXECUTION_ERROR,
-            message=f"Preview render failed: {str(e)}",
-        )
-    finally:
-        # Restore original settings
-        scene.render.resolution_percentage = orig_resolution
-        scene.frame_start = orig_start
-        scene.frame_end = orig_end
-        scene.render.filepath = orig_filepath
+    del scene, params
+    return ResponseBuilder.error(
+        handler="manage_sequencer",
+        action=SequencerAction.RENDER_PREVIEW.value,
+        error_code="OUTPUT_FAMILY_DISABLED",
+        message="Sequence preview rendering is disabled until every derived output is authorized",
+    )
