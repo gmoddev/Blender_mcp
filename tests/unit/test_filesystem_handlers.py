@@ -13,6 +13,7 @@ from blender_mcp.core.enums import (
     AdvancedBatchAction,
     CloudRenderAction,
     ExportAction,
+    RenderAction,
     SceneAction,
     SequencerAction,
     UVsAction,
@@ -30,6 +31,7 @@ from blender_mcp.handlers import manage_advanced_batch as AdvancedBatchModule
 from blender_mcp.handlers import manage_cloud_render as CloudRenderModule
 from blender_mcp.handlers import manage_export as StandardExportModule
 from blender_mcp.handlers import manage_export_pipeline as ExportPipelineModule
+from blender_mcp.handlers import manage_rendering as RenderingModule
 from blender_mcp.handlers import manage_scene as SceneModule
 from blender_mcp.handlers import manage_sequencer as SequencerModule
 from blender_mcp.handlers import manage_uvs as UVModule
@@ -458,6 +460,86 @@ def test_sequencer_preview_output_family_is_quarantined(
     EnsureEditor.assert_not_called()
 
 
+def test_render_execution_is_quarantined_before_scene_or_process_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    GetScene = MagicMock(side_effect=AssertionError("scene should not be accessed"))
+    Submit = MagicMock(side_effect=AssertionError("process should not be submitted"))
+    monkeypatch.setattr(RenderingModule.ContextManagerV3, "get_scene", GetScene)
+    monkeypatch.setattr(RenderingModule.AsyncJobManager, "submit_job", Submit)
+
+    FrameResult = RenderingModule._handle_render_frame(filepath="frame.png")
+    AnimationResult = RenderingModule._handle_render_animation(filepath="animation.mp4")
+    SubmitResult = RenderingModule._submit_async_render(None, {}, is_animation=True)
+
+    assert ErrorCode(FrameResult) == "PROCESS_EXECUTION_DISABLED"
+    assert ErrorCode(AnimationResult) == "PROCESS_EXECUTION_DISABLED"
+    assert ErrorCode(SubmitResult) == "PROCESS_EXECUTION_DISABLED"
+    GetScene.assert_not_called()
+    Submit.assert_not_called()
+
+
+def test_viewport_capture_denies_output_before_scene_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    WriteRoot = tmp_path / "captures"
+    WriteRoot.mkdir()
+    ConfigureFilesystemPolicy(WriteRoot=WriteRoot)
+    GetScene = MagicMock(side_effect=AssertionError("scene should not be accessed"))
+    monkeypatch.setattr(RenderingModule.ContextManagerV3, "get_scene", GetScene)
+    monkeypatch.setattr(RenderingModule.bpy.app, "background", False)
+
+    OutsideResult = RenderingModule.get_viewport_screenshot(
+        action="get_viewport_screenshot",
+        filepath=str(tmp_path / "outside.png"),
+    )
+    MultiResult = RenderingModule.get_viewport_screenshot(
+        action="get_viewport_screenshot",
+        angles=["FRONT", "TOP"],
+    )
+    Base64Result = RenderingModule.get_viewport_screenshot_base64(
+        action="get_viewport_screenshot_base64",
+        filepath=str(tmp_path / "outside.png"),
+    )
+
+    assert ErrorCode(OutsideResult) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    assert ErrorCode(MultiResult) == "OUTPUT_FAMILY_DISABLED"
+    assert ErrorCode(Base64Result) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    GetScene.assert_not_called()
+
+
+def test_viewport_capture_default_is_inside_write_root(tmp_path: Path) -> None:
+    ConfigureFilesystemPolicy(WriteRoot=tmp_path)
+
+    CapturePath = RenderingModule._CapturePath(None, "PNG", "viewport")
+
+    assert Path(CapturePath).parent == (tmp_path / "captures").resolve()
+    assert Path(CapturePath).suffix == ".png"
+
+
+def test_viewport_sink_reauthorizes_final_path_before_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    WriteRoot = tmp_path / "captures"
+    WriteRoot.mkdir()
+    ConfigureFilesystemPolicy(WriteRoot=WriteRoot)
+    Render = MagicMock(side_effect=AssertionError("capture operator should not run"))
+    monkeypatch.setattr(
+        RenderingModule,
+        "safe_ops",
+        SimpleNamespace(render=SimpleNamespace(opengl=Render)),
+    )
+    Scene = SimpleNamespace(render=SimpleNamespace(filepath="unchanged"))
+
+    Result = RenderingModule._do_opengl_capture(Scene, str(tmp_path / "outside.png"))
+
+    assert Result is False
+    assert Scene.render.filepath == "unchanged"
+    Render.assert_not_called()
+
+
 def test_filesystem_routes_declare_capabilities() -> None:
     assert HANDLER_METADATA["manage_scene"]["capabilities"][SceneAction.OPEN_FILE.value] == [
         Capability.MUTATE.value,
@@ -482,6 +564,16 @@ def test_filesystem_routes_declare_capabilities() -> None:
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
     assert HANDLER_METADATA["manage_sequencer"]["capabilities"][
         SequencerAction.RENDER_PREVIEW.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+    assert HANDLER_METADATA["manage_rendering"]["capabilities"][
+        RenderAction.RENDER_FRAME.value
+    ] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+        Capability.PROCESS.value,
+    ]
+    assert HANDLER_METADATA["get_viewport_screenshot"]["capabilities"][
+        "get_viewport_screenshot"
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
     for ToolName in ("export_unity_fbx", "export_unity_collection", "export_lod_chain"):
         assert HANDLER_METADATA[ToolName]["capabilities"][ToolName] == [

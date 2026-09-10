@@ -32,13 +32,16 @@ from ..core.versioning import BlenderCompatibility
 from ..core.thread_safety import execute_on_main_thread, ensure_main_thread
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.universal_coercion import TypeCoercer, ParameterNormalizer
 from ..dispatcher import register_handler
 from ..core.enums import RenderAction, RenderEngine, RenderQualityPreset
 from ..core.validation_utils import ValidationUtils
 from ..core.job_manager import AsyncJobManager
+from ..utils.path import get_safe_path
 import os
 
 
@@ -51,6 +54,55 @@ _FORMAT_MIME: dict = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/w
 
 # Hard limit for inline __mcp_image_data__ in get_viewport_screenshot (1 MB).
 _INLINE_IMAGE_MAX_BYTES = 1 * 1024 * 1024
+_CAPTURE_EXTENSIONS = {
+    "PNG": {".png"},
+    "JPEG": {".jpg", ".jpeg"},
+    "WEBP": {".webp"},
+}
+_PREFERRED_CAPTURE_EXTENSION = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
+
+RenderCapabilities = {Action.value: [Capability.MUTATE.value] for Action in RenderAction}
+for RenderFileAction in (
+    RenderAction.RENDER_FRAME.value,
+    RenderAction.RENDER_STILL.value,
+    RenderAction.RENDER_ANIMATION.value,
+):
+    RenderCapabilities[RenderFileAction] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+        Capability.PROCESS.value,
+    ]
+
+
+def _FilesystemError(Handler: str, Action: str, Error: FilesystemPolicyError) -> Dict[str, Any]:
+    return ResponseBuilder.error(
+        handler=Handler,
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
+
+
+def _CapturePath(RawPath: Any, ImageFormat: str, Prefix: str) -> str:
+    PreferredExtension = _PREFERRED_CAPTURE_EXTENSION[ImageFormat]
+    Candidate = str(RawPath) if RawPath else f"captures/{Prefix}_{uuid.uuid4().hex[:12]}"
+    if not os.path.splitext(Candidate)[1]:
+        Candidate += PreferredExtension
+    return get_safe_path(
+        Candidate,
+        Access=FilesystemAccess.WRITE,
+        AllowedExtensions=_CAPTURE_EXTENSIONS[ImageFormat],
+        CreateParents=True,
+    )
+
+
+def _RenderExecutionDisabled(Action: str) -> Dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_rendering",
+        action=Action,
+        error_code="PROCESS_EXECUTION_DISABLED",
+        message="Background rendering is disabled until process and temporary-artifact policy is enabled",
+    )
 
 
 class RenderTimeout(Enum):
@@ -65,6 +117,7 @@ class RenderTimeout(Enum):
 
 @register_handler(
     "manage_rendering",
+    capabilities=RenderCapabilities,
     schema={
         "type": "object",
         "title": "Render Manager",
@@ -72,13 +125,9 @@ class RenderTimeout(Enum):
             "CORE — Configure render settings and execute renders.\n"
             "ACTIONS: SET_ENGINE, SET_RESOLUTION, SET_SAMPLES, SET_QUALITY_PRESET, "
             "RENDER_FRAME (aka RENDER_STILL), RENDER_ANIMATION\n\n"
-            "RENDER_FRAME and RENDER_ANIMATION run as non-blocking background subprocesses — "
-            "they return a job_id immediately. Use manage_jobs(LIST_JOBS) to monitor progress "
-            "and manage_jobs(CANCEL_JOB, job_id=...) to stop a running render.\n"
-            "Always provide 'filepath' to control where frames are saved; "
-            "if omitted, output is redirected to the system temp directory automatically.\n\n"
-            "NOTE: Do NOT use bpy.ops.render.render() in execute_blender_code — it freezes Blender "
-            "and the MCP server stops responding. Use RENDER_FRAME here instead."
+            "RENDER_FRAME and RENDER_ANIMATION are temporarily disabled until process and "
+            "temporary-artifact authority is explicitly enabled.\n\n"
+            "Do not substitute execute_blender_code for the disabled render actions."
         ),
         "properties": {
             "action": ValidationUtils.generate_enum_schema(RenderAction, "Operation to perform"),
@@ -99,10 +148,8 @@ class RenderTimeout(Enum):
             "filepath": {
                 "type": "string",
                 "description": (
-                    "Output file/directory path. REQUIRED for RENDER_ANIMATION and RENDER_FRAME "
-                    "to control where frames land. Example: 'C:/renders/my_anim/frame_'. "
-                    "If omitted, output is auto-redirected to the system temp directory — "
-                    "frames will NOT appear on Desktop or other unexpected locations."
+                    "Reserved output path under the configured write root. Render execution remains "
+                    "disabled until process and temporary-artifact policy is enabled."
                 ),
             },
             "auto_camera": {
@@ -527,6 +574,8 @@ def _handle_render_frame(**params: Any) -> Dict[str, Any]:
 
     FIXED: Extended timeout support for long renders (high quality, 4K, etc.)
     """
+    return _RenderExecutionDisabled(RenderAction.RENDER_FRAME.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_rendering",
@@ -630,6 +679,8 @@ def _handle_render_animation(**params: Any) -> Dict[str, Any]:
 
     FIXED: Extended timeout (up to 2 hours) for long animation renders
     """
+    return _RenderExecutionDisabled(RenderAction.RENDER_ANIMATION.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_rendering",
@@ -700,6 +751,9 @@ def _submit_async_render(
     subdirectory to prevent renders silently writing to unexpected locations
     (Desktop, Blender install dir, etc.).
     """
+    del scene, params, is_animation
+    return _RenderExecutionDisabled("ASYNC_SUBMIT")
+
     import tempfile
 
     # 1. Resolve output path BEFORE saving the temp file.
@@ -833,6 +887,13 @@ def _create_auto_camera() -> "Object":
 
 @register_handler(
     "render_frame",
+    capabilities={
+        "render_frame": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+            Capability.PROCESS.value,
+        ]
+    },
     schema={
         "type": "object",
         "properties": {
@@ -854,6 +915,13 @@ def render_frame_alias(**params: Any) -> Dict[str, Any]:
 
 @register_handler(
     "render_animation",
+    capabilities={
+        "render_animation": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+            Capability.PROCESS.value,
+        ]
+    },
     schema={
         "type": "object",
         "properties": {
@@ -1333,25 +1401,35 @@ def _resize_image_to_max_size(filepath: str, max_size: int) -> None:
             img.save()
         finally:
             bpy.data.images.remove(img)
-    except Exception as e:
-        logger.warning(f"_resize_image_to_max_size failed: {e}")
+    except Exception:
+        logger.warning("[BlenderMCP:ViewportCapture] resize failed")
 
 
 def _do_opengl_capture(scene: Any, filepath: str) -> bool:
     """Run render.opengl and write to filepath. Must be called on the main thread."""
+    try:
+        filepath = get_safe_path(
+            filepath,
+            Access=FilesystemAccess.WRITE,
+            AllowedExtensions={".png", ".jpg", ".jpeg", ".webp"},
+            CreateParents=False,
+        )
+    except FilesystemPolicyError:
+        logger.warning("[BlenderMCP:ViewportCapture] output authorization failed")
+        return False
     scene.render.filepath = filepath
     try:
         with ContextManagerV3.temp_override(area_type="VIEW_3D", scene=scene):
             safe_ops.render.opengl(write_still=True, view_context=True)
         return True
-    except Exception as e:
-        logger.warning(f"opengl view_context=True failed: {e}")
+    except Exception:
+        logger.warning("[BlenderMCP:ViewportCapture] primary capture failed")
     try:
         with ContextManagerV3.temp_override(area_type="VIEW_3D", scene=scene):
             safe_ops.render.opengl(write_still=True, view_context=False)
         return True
-    except Exception as e2:
-        logger.error(f"opengl view_context=False fallback failed: {e2}")
+    except Exception:
+        logger.error("[BlenderMCP:ViewportCapture] fallback capture failed")
         return False
 
 
@@ -1465,14 +1543,19 @@ def _apply_max_size(scene: Any, max_size: int) -> tuple:
 @register_handler(
     "get_viewport_screenshot",
     priority=10,
+    capabilities={
+        "get_viewport_screenshot": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ]
+    },
     schema={
         "type": "object",
         "title": "Get Viewport Screenshot",
         "description": (
-            "Capture viewport screenshot(s). Returns file path(s) and inline base64 preview images. "
-            "For multi-angle base64 output use get_viewport_screenshot_base64 (TIER 1, priority 3). "
-            "Supports angles=['FRONT','TOP','RIGHT','ISOMETRIC'] for batch capture — all returned as images. "
-            "Use frame=N to capture at a specific animation frame."
+            "Capture one viewport screenshot under the configured write root and optionally return "
+            "inline base64 preview data. Multi-angle output is disabled until every derived path can "
+            "be authorized before capture."
         ),
         "properties": {
             "action": {
@@ -1481,7 +1564,10 @@ def _apply_max_size(scene: Any, max_size: int) -> tuple:
                 "default": "get_viewport_screenshot",
                 "description": "Action to perform",
             },
-            "filepath": {"type": "string", "description": "Output file path (optional)"},
+            "filepath": {
+                "type": "string",
+                "description": "Output path under the configured write root",
+            },
             "max_size": {"type": "integer", "description": "Max pixel dimension (default 800)"},
             "format": {
                 "type": "string",
@@ -1494,7 +1580,7 @@ def _apply_max_size(scene: Any, max_size: int) -> tuple:
                     "type": "string",
                     "enum": ["FRONT", "BACK", "TOP", "BOTTOM", "LEFT", "RIGHT", "PERSP"],
                 },
-                "description": "Capture from multiple angles. If omitted, captures current view.",
+                "description": "Reserved; multi-angle output is currently disabled.",
             },
             "shading": {
                 "type": "string",
@@ -1527,7 +1613,7 @@ def _apply_max_size(scene: Any, max_size: int) -> tuple:
                     "FRONT/BACK/LEFT/RIGHT/TOP/BOTTOM: orthographic axis views. "
                     "PERSPECTIVE: free perspective view. ISOMETRIC: isometric view. "
                     "CLOSE_FRONT/CLOSE_TOP: tight close-up (0.35x distance). AERIAL: high bird's-eye (3.5x). "
-                    "Must be a SINGLE string — use 'angles' for multi-view batch capture. "
+                    "Must be a single string; multi-angle capture is currently disabled. "
                     "Passing a list will return an INVALID_PARAMETER error."
                 ),
             },
@@ -1562,21 +1648,16 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
     Capture viewport screenshot(s) and return file path(s).
 
     Params:
-        filepath (str): Output path. Auto-generated in temp dir if omitted.
+        filepath (str): Output path below the write root. Generated under captures/ if omitted.
         max_size (int): Max pixel dimension (default 800). Preserves aspect ratio.
         format (str): 'PNG' or 'JPG' (default 'PNG').
-        angles (list[str]): Multi-angle capture — e.g. ["FRONT", "TOP", "PERSP"].
+        angles (list[str]): Reserved; multi-angle capture is currently disabled.
         shading (str): Viewport shading — SOLID, MATERIAL (default), RENDERED, WIREFRAME.
         frame_scene (bool): Auto-frame scene objects before capture (default True).
 
     Returns:
-        Single angle: {filepath: "..."} | Multi-angle: {filepaths: {angle: "..."}}
+        {filepath: "..."} with optional inline image data.
     """
-    import tempfile
-    import traceback
-
-    from ..utils.path import get_safe_path
-
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="get_viewport_screenshot",
@@ -1598,6 +1679,17 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
         user_path = params.get("filepath")
         img_format = _FORMAT_MAP.get(params.get("format", "PNG").upper(), "PNG")
         angles = params.get("angles")
+        if angles:
+            return ResponseBuilder.error(
+                handler="get_viewport_screenshot",
+                action="CAPTURE",
+                error_code="OUTPUT_FAMILY_DISABLED",
+                message="Multi-angle capture is disabled until every derived output is authorized",
+            )
+        try:
+            base_filepath = _CapturePath(user_path, img_format, "viewport")
+        except FilesystemPolicyError as Error:
+            return _FilesystemError("get_viewport_screenshot", "CAPTURE", Error)
         shading = str(params.get("shading", "MATERIAL")).upper()
         if shading not in _VALID_SHADING_TYPES:
             shading = "MATERIAL"
@@ -1615,7 +1707,7 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
                 error_code="INVALID_PARAMETER",
                 message=(
                     "view_direction must be a single string (e.g. 'FRONT'), not a list. "
-                    "For multi-angle batch capture use the 'angles' parameter instead."
+                    "Multi-angle capture is currently disabled."
                 ),
             )
         view_direction = str(view_direction_raw).upper() if view_direction_raw else None
@@ -1632,19 +1724,6 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
         target_object_name = params.get("target_object")
         raw_distance = params.get("distance")
         view_distance = float(raw_distance) if raw_distance is not None else None
-
-        # Resolve base filepath
-        if user_path:
-            try:
-                parent = os.path.dirname(os.path.abspath(user_path))
-                if parent:
-                    os.makedirs(parent, exist_ok=True)
-                base_filepath = user_path
-            except OSError as e:
-                logger.warning(f"Failed to create dir for '{user_path}': {e}. Using safe path.")
-                base_filepath = get_safe_path(user_path)
-        else:
-            base_filepath = os.path.join(tempfile.gettempdir(), f"mcp_view_{int(time.time())}.png")
 
         scene = ContextManagerV3.get_scene()
         if not scene:
@@ -1787,7 +1866,7 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
                 _set_viewport_shading(old_shading)
 
     except Exception as e:
-        traceback.print_exc()
+        logger.error("[BlenderMCP:ViewportCapture] capture failed")
         return ResponseBuilder.error(
             handler="get_viewport_screenshot",
             action="CAPTURE",
@@ -1799,13 +1878,23 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
 @register_handler(
     "get_viewport_screenshot_base64",
     priority=3,
+    capabilities={
+        "get_viewport_screenshot_base64": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ],
+        "SMART_SCREENSHOT": [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ],
+    },
     schema={
         "type": "object",
         "title": "Get Viewport Screenshot (TIER 1 — Visual Feedback)",
         "description": (
             "ESSENTIAL (priority=3) — Viewport capture tool. Saves image to disk and returns the file path.\n"
-            "AI can view the image file using the Read tool on the returned filepath.\n"
-            "Set base64=true to also write a JSON file containing the base64-encoded image.\n\n"
+            "The capture is written under the configured write root.\n"
+            "Base64 image data is returned inline; no JSON sidecar is written.\n\n"
             "*** ALWAYS SPECIFY target_object FOR OBJECT SHOTS ***\n"
             "Without target_object the viewport frames THE ENTIRE SCENE — parts will appear tiny.\n"
             "With target_object the viewport zooms directly to that object's bounding box.\n\n"
@@ -1814,8 +1903,6 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
             '  {"action":"get_viewport_screenshot_base64","target_object":"Drone_Arm_01","view_direction":"ISOMETRIC"}\n'
             "  # Scene overview — solid shading, top view\n"
             '  {"action":"get_viewport_screenshot_base64","view_direction":"TOP","shading":"SOLID"}\n'
-            "  # Multi-angle batch (3 images in one call)\n"
-            '  {"action":"get_viewport_screenshot_base64","target_object":"Body","views":["ISOMETRIC","FRONT","TOP"]}\n'
             "  # Two-object gap inspection — union AABB zoom\n"
             '  {"action":"get_viewport_screenshot_base64","target_objects":["Arm_01","MotorPod_01"],"view_direction":"ISOMETRIC"}\n'
             "  # Two-object gap inspection — gap-midpoint zoom (tight, 2mm gap)\n"
@@ -1826,7 +1913,7 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
             '  {"action":"get_viewport_screenshot_base64","view_direction":"AERIAL","shading":"SOLID"}\n'
             "  # Quick scene check\n"
             '  {"action":"SMART_SCREENSHOT"}\n'
-            "  # Save base64 JSON sidecar file\n"
+            "  # Return inline base64 image data\n"
             '  {"action":"get_viewport_screenshot_base64","target_object":"Body","base64":true}\n'
             "  # Specific animation frame, high-res\n"
             '  {"action":"get_viewport_screenshot_base64","frame":24,"max_size":1024}\n\n'
@@ -1836,20 +1923,19 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
             "  gap_focus_m    — Gap in meters for tight gap-midpoint zoom (use with target_objects).\n"
             "                   Get from ANALYZE_ASSEMBLY issue.gap_m. 0.002=2mm→tight, 0.02=20mm→moderate.\n"
             "  view_direction — ISOMETRIC|FRONT|BACK|TOP|BOTTOM|LEFT|RIGHT|CLOSE_FRONT|CLOSE_TOP|AERIAL|PERSPECTIVE\n"
-            "  views          — Multi-angle list: ['ISOMETRIC','FRONT','TOP'] → all images in one call\n"
+            "  views          — Reserved; multi-view output is currently disabled.\n"
             "  shading        — MATERIAL (default, PBR) | SOLID (geometry only, faster) | WIREFRAME\n"
             "  max_size       — 512 (default). 256=quick, 1024=detail. Keep ≤512 to avoid payload bloat.\n"
             "  frame_scene    — True (default): auto-frame whole scene. Ignored when target_object is set.\n"
             "  frame          — Animation frame to capture (e.g. frame=24). Scene restores after.\n"
-            "  base64         — False (default). If true, saves base64 JSON sidecar and returns its path.\n\n"
+            "  base64         — False (default). If true, requires inline data within the size limit.\n\n"
             "BEST PRACTICES:\n"
             "  ✓ Always use target_object when inspecting a specific part\n"
-            "  ✓ Assembly overview: views=['ISOMETRIC','TOP','FRONT','RIGHT'] (no target_object)\n"
             "  ✓ Gap inspection: target_objects=['A','B'], gap_focus_m=<issue.gap_m>, view_direction='FRONT'\n"
             "  ✓ Detail shot: target_object='PartName', view_direction='CLOSE_FRONT'\n"
             "  ✓ Quick: action='SMART_SCREENSHOT'\n"
             "  ✗ Do NOT use RENDERED shading (slow; MATERIAL is sufficient)\n"
-            "  ✗ Do NOT combine views and view_direction in same call"
+            "  ✗ Multi-view capture is disabled until every output path is preauthorized"
         ),
         "properties": {
             "action": {
@@ -1866,8 +1952,8 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
                 "type": "boolean",
                 "default": False,
                 "description": (
-                    "If true, encodes the captured image as base64 and saves it to a JSON file. "
-                    "Returns base64_filepath in the response. Default: image file only, no base64."
+                    "If true, requires inline base64 image data within the size limit. "
+                    "No JSON sidecar is written."
                 ),
             },
             "return_base64": {
@@ -1878,9 +1964,8 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
             "filepath": {
                 "type": "string",
                 "description": (
-                    "Output file save path (optional). "
-                    "If omitted the image is auto-saved to the system temp directory and "
-                    "the actual path is returned in the response. "
+                    "Output path within the configured filesystem write root. "
+                    "If omitted, a unique relative path under captures/ is used. "
                     "Example: 'C:/renders/my_model_preview.png'"
                 ),
             },
@@ -1924,7 +2009,7 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
                     "FRONT/BACK/LEFT/RIGHT/TOP/BOTTOM: orthographic axis views. "
                     "PERSPECTIVE: free perspective view. ISOMETRIC: isometric view. "
                     "CLOSE_FRONT/CLOSE_TOP: tight close-up (0.35x distance). AERIAL: high bird's-eye (3.5x). "
-                    "Must be a SINGLE string — for multi-view batch use get_viewport_screenshot with 'angles'. "
+                    "Must be a single string; multi-view capture is currently disabled. "
                     "Passing a list will return an INVALID_PARAMETER error."
                 ),
             },
@@ -1976,10 +2061,8 @@ def get_viewport_screenshot(**params: Any) -> Dict[str, Any]:
                     ],
                 },
                 "description": (
-                    "Capture from multiple directions in one call — returns ALL images for AI vision. "
-                    "Do NOT combine with view_direction. "
-                    "Example: ['ISOMETRIC','FRONT','TOP'] → 3 images shown to Claude. "
-                    "Each image uses target_object + frame_scene settings."
+                    "Reserved; multi-view output is disabled until every derived path can be "
+                    "authorized before viewport mutation."
                 ),
             },
             "gap_focus_m": {
@@ -2008,26 +2091,21 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
     """
     Capture viewport screenshot and save to disk. Returns the file path.
 
-    Default: saves image file, returns filepath. No base64 in response.
-    base64=true: also encodes image as base64, saves to a JSON file, returns base64_filepath.
+    Default: saves image file and returns inline base64 when within the size limit.
+    base64=true: requires inline base64 to fit the size limit. No JSON sidecar is written.
 
     Params:
-        filepath (str): Output path. Auto-generated in temp dir if omitted.
+        filepath (str): Output path below the write root. Generated under captures/ if omitted.
         max_size (int): Max pixel dimension (default 512).
         format (str): 'PNG', 'JPEG'/'JPG', or 'WEBP' (default 'PNG').
         shading (str): Viewport shading — SOLID, MATERIAL (default), RENDERED, WIREFRAME.
         frame_scene (bool): Auto-frame scene objects before capture (default True).
-        base64 (bool): If True, save base64 to a JSON file and include path in response.
+        base64 (bool): If True, require inline base64 data within the size limit.
 
     Returns:
         {filepath: "...", format: "...", resolution: [...], shading: "..."}
-        + base64_filepath: "..." if base64=true
     """
     import base64
-    import tempfile
-    import traceback
-
-    from ..utils.path import get_safe_path
 
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
@@ -2077,6 +2155,18 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
         max_size = int(params.get("max_size", 512))
         user_path = params.get("filepath")
         img_format = _FORMAT_MAP.get(params.get("format", "PNG").upper(), "PNG")
+        views_list = params.get("views")
+        if views_list:
+            return ResponseBuilder.error(
+                handler="get_viewport_screenshot_base64",
+                action="CAPTURE",
+                error_code="OUTPUT_FAMILY_DISABLED",
+                message="Multi-view capture is disabled until every derived output is authorized",
+            )
+        try:
+            filepath = _CapturePath(user_path, img_format, "viewport_b64")
+        except FilesystemPolicyError as Error:
+            return _FilesystemError("get_viewport_screenshot_base64", "CAPTURE", Error)
         shading = str(params.get("shading", "MATERIAL")).upper()
         if shading not in _VALID_SHADING_TYPES:
             shading = "MATERIAL"
@@ -2122,7 +2212,6 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
                 two_obj_frame = frame_result  # type: ignore[assignment]
 
         # --- MULTI-VIEW MODE: views=[...] captures multiple angles, returns __mcp_images__ ---
-        views_list = params.get("views")
         if views_list and isinstance(views_list, list):
             import base64 as _b64mv
 
@@ -2201,8 +2290,7 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
                 error_code="INVALID_PARAMETER",
                 message=(
                     "view_direction must be a single string (e.g. 'FRONT'), not a list. "
-                    "For multi-angle capture use the 'views' parameter instead: "
-                    "views=['FRONT','TOP','ISOMETRIC']"
+                    "Multi-view capture is currently disabled."
                 ),
             )
         view_direction = str(view_direction_raw).upper() if view_direction_raw else None
@@ -2216,19 +2304,6 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
                     f"Valid values: {sorted(_VALID_VIEW_DIRECTIONS)}"
                 ),
             )
-
-        # Resolve filepath
-        if user_path:
-            try:
-                parent = os.path.dirname(os.path.abspath(user_path))
-                if parent:
-                    os.makedirs(parent, exist_ok=True)
-                filepath = user_path
-            except OSError as e:
-                logger.warning(f"Failed to create dir for '{user_path}': {e}. Using safe path.")
-                filepath = get_safe_path(user_path)
-        else:
-            filepath = os.path.join(tempfile.gettempdir(), f"mcp_view_b64_{int(time.time())}.png")
 
         orig_format = getattr(scene.render.image_settings, "file_format", "PNG")
         scene.render.image_settings.file_format = img_format
@@ -2295,7 +2370,7 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
             }
 
             # Always encode base64 for inline delivery (tool is named *_base64).
-            # use_base64=True additionally writes a JSON sidecar file.
+            # use_base64=True makes an oversized inline result fail explicitly.
             MAX_BASE64_FILE_SIZE = 1 * 1024 * 1024  # 1 MB hard limit
             file_size = os.path.getsize(filepath)
             if file_size > MAX_BASE64_FILE_SIZE:
@@ -2315,21 +2390,6 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
                     b64_data = base64.b64encode(fh.read()).decode("utf-8")
                 response_data["__mcp_image_data__"] = b64_data
                 response_data["__mcp_image_mime__"] = _FORMAT_MIME.get(img_format, "image/png")
-                if use_base64:
-                    import json as _json
-
-                    b64_json_path = os.path.splitext(filepath)[0] + "_b64.json"
-                    with open(b64_json_path, "w") as jf:
-                        _json.dump(
-                            {
-                                "base64": b64_data,
-                                "mime": _FORMAT_MIME.get(img_format, "image/png"),
-                                "filepath": filepath,
-                            },
-                            jf,
-                        )
-                    response_data["base64_filepath"] = b64_json_path
-
             return ResponseBuilder.success(
                 handler="get_viewport_screenshot_base64",
                 action="CAPTURE",
@@ -2348,7 +2408,7 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
                 scene.frame_set(original_frame)
 
     except Exception as e:
-        traceback.print_exc()
+        logger.error("[BlenderMCP:ViewportCapture] base64 capture failed")
         return ResponseBuilder.error(
             handler="get_viewport_screenshot_base64",
             action="CAPTURE",

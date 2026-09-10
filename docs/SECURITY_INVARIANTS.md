@@ -54,6 +54,9 @@ means the invariant is required but not yet proven by the current implementation
   file-operator harness.
 - Sequencer media reads require a configured read root and action-specific media type before the
   editor is created. Preview rendering is quarantined until its derived output family is explicit.
+- Single viewport captures are write-root confined and final-sink revalidated. Multi-output capture
+  and primary background rendering remain quarantined pending output-family, process, temporary
+  artifact, credential-scrubbing, and cleanup controls.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
 - `pyproject.toml` and `LICENSE`: package metadata disagrees about the license.
 

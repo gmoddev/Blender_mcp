@@ -90,6 +90,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   sidecars, and string-path TOCTOU prevent valuable-asset readiness.
 - Sequencer media inputs are authorized before editor creation. Sequencer preview rendering is
   disabled until its frame-derived output family can be authorized as a unit.
+- Single viewport captures publish below the write root and return image data inline without JSON
+  sidecars. Multi-output capture is disabled. Primary background render helpers are also disabled
+  because output authority does not imply process launch or unmanaged temporary-scene authority.
 
 ## Reference-Repositories Assessment
 

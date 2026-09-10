@@ -36,6 +36,9 @@ Authorize the final concrete path immediately before the file sink:
    external inputs can receive explicit read grants.
 8. authorize sequencer media before creating its editor and quarantine preview rendering until all
    frame-derived outputs can be enumerated and authorized.
+9. confine single viewport captures to the write root, remove implicit system-temp/JSON sidecar
+   outputs, and quarantine multi-output captures. Quarantine primary background rendering until
+   process and temporary-artifact authority are independently defined.
 
 Grant `FILESYSTEM_READ` and `FILESYSTEM_WRITE` only when the corresponding validated root exists.
 Safe Mode may combine `READ` with `FILESYSTEM_READ`, but it never gains `MUTATE` or filesystem

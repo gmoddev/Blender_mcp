@@ -132,6 +132,21 @@ derive multiple filenames from the current render format, frame range, and path 
 it only after the full output family is enumerated, authorized, and tested for overwrite behavior.
 This remains partial 0E; the next slice is the broader rendering/capture family.
 
+## Sixth Implementation Slice: Foundation 0E render/capture containment
+
+Single viewport screenshots now require `FILESYSTEM_WRITE`, resolve explicit or unique default
+paths below the write root, enforce format-specific extensions, and reauthorize immediately before
+the OpenGL file sink. System-temp fallback and base64 JSON sidecars are removed. Multi-angle and
+multi-view modes are quarantined until every derived output can be authorized before viewport
+mutation.
+
+Primary frame/animation actions and their aliases now declare `PROCESS` plus filesystem write
+authority and fail closed in the registered handlers and direct async submission helper. This
+contains the unmanaged secret-bearing temporary `.blend` copy and headless-process path instead of
+treating a render output path as permission for both. Re-enablement belongs with Foundation 0G/0I:
+credential scrubbing, controlled temporary artifacts, cleanup, process policy, and complete frame
+output-family grants. Other render managers and capture surfaces remain in the 0E sink audit.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

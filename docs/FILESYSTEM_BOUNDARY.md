@@ -32,6 +32,7 @@ The first migrated source-to-sink family covers:
 - standard, pipeline, batch-variant, and Unity export routes;
 - UV layout export;
 - sequencer movie, sound, and still-image reads;
+- single viewport screenshot outputs;
 - cloud-render current-file saves.
 
 This slice authorizes only exporter outputs whose complete output family is known. glTF writes are
@@ -40,7 +41,16 @@ texture path mode is fixed to `STRIP`, and USD texture export/overwrite is force
 packaging and SheepIt preparation are quarantined because Blender's pack operation can read every
 linked external asset; they remain disabled until each input can be enumerated and granted read
 authority before mutation. Sequencer preview rendering is likewise quarantined because animation
-rendering derives a multi-file output family from mutable scene settings.
+rendering derives a multi-file output family from mutable scene settings. Single viewport captures
+default to a unique `captures/` path below the write root, are reauthorized at the final OpenGL
+sink, and return base64 inline without a JSON sidecar. Multi-angle and multi-view captures are
+disabled until all derived output paths can be preauthorized.
+
+Primary frame/animation render actions and their aliases declare both `FILESYSTEM_WRITE` and
+`PROCESS` but fail closed at the registered and direct helpers. Their former flow copied the whole
+scene to an unmanaged temporary `.blend` and launched a subprocess, so filesystem write approval
+alone cannot authorize it. Re-enablement requires explicit process policy, a controlled temporary
+artifact root, credential scrubbing, cleanup, and complete frame-family authorization.
 
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
@@ -56,7 +66,7 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Rendering outputs, viewport captures, other imported assets, caches, temporary provider
+Other rendering outputs, other imported assets, caches, temporary provider
 artifacts, subprocess paths, and other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and

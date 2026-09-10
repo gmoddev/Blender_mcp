@@ -96,9 +96,11 @@ states. These controls still require live Blender and reconnect/fault validation
 and direct provider timer callbacks remain outside the ledger. The scene/export
 family now has a partial filesystem authority boundary. Multi-file glTF, USD
 texture sidecars, and external asset packing are disabled pending complete
-input/output-family grants; rendering, captures, remaining imports/providers, sequencer preview
-outputs, other sidecars, atomic publication, and live cross-platform validation remain open. Other
-known gaps remain in external
+input/output-family grants. Single viewport captures are write-root confined; multi-output capture
+and primary background rendering are disabled pending process, temporary-artifact, cleanup, and
+complete output-family policy. Other render/capture paths, remaining imports/providers, sequencer
+preview outputs, other sidecars, atomic publication, and live cross-platform validation remain
+open. Other known gaps remain in external
 integration isolation, provider credential storage, download/archive limits,
 selector complexity, checkpoint recovery, and the remaining logging surface.
 These are scan targets, not accepted risks.
