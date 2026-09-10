@@ -166,6 +166,21 @@ approved `.hdr` loading, and confirms that the registered headless render action
 This remains partial 0E. The next slice audits remaining local imports, bake/cache outputs, provider
 artifacts, and internal temporary/log paths before the 0F network/download/archive boundary.
 
+## Eighth Implementation Slice: Foundation 0E motion-capture input authority
+
+Motion-capture BVH import now declares `FILESYSTEM_READ`, accepts only an existing `.bvh` beneath
+the user-approved read root, and authorizes the final path before invoking Blender's importer.
+Missing, outside-root, wrong-extension, and importer failures return structured redacted errors.
+
+FBX animation import is quarantined with `INPUT_FAMILY_DISABLED` at the direct helper. Blender's FBX
+importer can resolve textures and other linked files from content-controlled paths, so granting the
+primary `.fbx` path is not authority to read its dependency family. Re-enablement requires parsing
+or importer preflight that inventories every external dependency before any Blender mutation.
+
+Blender 5.2.1 background validation passes outside-root BVH denial without object creation, approved
+single-file BVH import, and FBX input-family denial. The remaining 0E audit proceeds to bake/cache
+directories and provider-managed artifacts.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

@@ -15,6 +15,7 @@ from blender_mcp.core.enums import (
     ExportAction,
     HeadlessModeAction,
     LightAction,
+    MocapAction,
     RenderAction,
     SceneAction,
     SequencerAction,
@@ -35,6 +36,7 @@ from blender_mcp.handlers import manage_export as StandardExportModule
 from blender_mcp.handlers import manage_export_pipeline as ExportPipelineModule
 from blender_mcp.handlers import manage_headless_mode as HeadlessHandlerModule
 from blender_mcp.handlers import manage_light as LightModule
+from blender_mcp.handlers import manage_mocap as MocapModule
 from blender_mcp.handlers import manage_rendering as RenderingModule
 from blender_mcp.handlers import manage_scene as SceneModule
 from blender_mcp.handlers import manage_sequencer as SequencerModule
@@ -611,6 +613,73 @@ def test_headless_render_aliases_are_quarantined_before_scene_or_output_mutation
     GetScene.assert_not_called()
 
 
+def test_mocap_bvh_denies_outside_root_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ReadRoot = tmp_path / "mocap"
+    ReadRoot.mkdir()
+    Outside = tmp_path / "outside.bvh"
+    Outside.write_text("HIERARCHY", encoding="utf-8")
+    ConfigureFilesystemPolicy(ReadRoot=ReadRoot)
+    ImportBvh = MagicMock(side_effect=AssertionError("BVH importer should not run"))
+    monkeypatch.setattr(
+        MocapModule,
+        "bpy",
+        SimpleNamespace(ops=SimpleNamespace(import_anim=SimpleNamespace(bvh=ImportBvh))),
+    )
+
+    Result = MocapModule._import_bvh({"filepath": str(Outside)})
+
+    assert ErrorCode(Result) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    ImportBvh.assert_not_called()
+
+
+def test_mocap_bvh_preserves_authorized_single_file_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Bvh = tmp_path / "walk.bvh"
+    Bvh.write_text("HIERARCHY", encoding="utf-8")
+    ConfigureFilesystemPolicy(ReadRoot=tmp_path)
+    ImportBvh = MagicMock()
+    monkeypatch.setattr(
+        MocapModule,
+        "bpy",
+        SimpleNamespace(
+            ops=SimpleNamespace(import_anim=SimpleNamespace(bvh=ImportBvh)),
+            context=SimpleNamespace(active_object=SimpleNamespace(name="WalkRig")),
+        ),
+    )
+
+    Result = MocapModule._import_bvh({"filepath": str(Bvh)})
+
+    assert Result["success"] is True
+    ImportBvh.assert_called_once_with(
+        filepath=str(Bvh.resolve()),
+        global_scale=1.0,
+        use_fps_scale=True,
+        update_scene_fps=True,
+        update_scene_duration=True,
+    )
+
+
+def test_mocap_fbx_input_family_is_quarantined_before_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ImportFbx = MagicMock(side_effect=AssertionError("FBX importer should not run"))
+    monkeypatch.setattr(
+        MocapModule,
+        "bpy",
+        SimpleNamespace(ops=SimpleNamespace(import_scene=SimpleNamespace(fbx=ImportFbx))),
+    )
+
+    Result = MocapModule._import_fbx({"filepath": "linked-animation.fbx"})
+
+    assert ErrorCode(Result) == "INPUT_FAMILY_DISABLED"
+    ImportFbx.assert_not_called()
+
+
 def test_render_execution_is_quarantined_before_scene_or_process_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -722,6 +791,12 @@ def test_filesystem_routes_declare_capabilities() -> None:
     assert HANDLER_METADATA["manage_headless_mode"]["capabilities"][
         HeadlessModeAction.RENDER_HEADLESS.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+    assert HANDLER_METADATA["manage_mocap"]["capabilities"][
+        MocapAction.IMPORT_BVH.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
+    assert HANDLER_METADATA["manage_mocap"]["capabilities"][
+        MocapAction.IMPORT_FBX_ANIMATION.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
     assert HANDLER_METADATA["manage_rendering"]["capabilities"][
         RenderAction.RENDER_FRAME.value
     ] == [

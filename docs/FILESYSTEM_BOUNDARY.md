@@ -33,6 +33,7 @@ The first migrated source-to-sink family covers:
 - UV layout export;
 - sequencer movie, sound, and still-image reads;
 - `.hdr` and `.exr` environment-image reads;
+- single-file `.bvh` motion-capture reads;
 - single viewport screenshot outputs;
 - cloud-render current-file saves.
 
@@ -59,6 +60,10 @@ files through compositor File Output nodes and other mutable scene configuration
 points remain unavailable until the entire output family can be enumerated and authorized before
 any scene mutation.
 
+Motion-capture BVH import accepts one authorized `.bvh` file. FBX animation import remains disabled
+because an approved primary file can name textures or other linked inputs outside the read root;
+those dependencies must be enumerated and authorized before Blender receives the file.
+
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
 The deprecated `force_export` input is denied and cannot skip resource or path policy.
@@ -81,8 +86,8 @@ therefore fail closed, but their action metadata and sidecar behavior are not ye
 Windows unit coverage exercises traversal,
 sibling-prefix, ambiguous syntax, overwrite, and final-extension behavior. Blender 5.2.1 live
 validation passes outside-root open/save/export denial, sentinel preservation, approved overwrite,
-approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI denial,
-approved `.hdr` loading, and headless-render quarantine without an output file. Supported POSIX and
-broader live operator coverage remain required.
+approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI/BVH denial,
+approved `.hdr` and BVH loading, and headless/FBX quarantine without filesystem side effects.
+Supported POSIX and broader live operator coverage remain required.
 
 Until those gates pass, use disposable `.blend` copies and treat Foundation 0E as partial.

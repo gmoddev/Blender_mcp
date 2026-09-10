@@ -28,6 +28,7 @@ from blender_mcp.core.filesystem_boundary import (  # noqa: E402
 )
 from blender_mcp.handlers.manage_headless_mode import manage_headless_mode  # noqa: E402
 from blender_mcp.handlers.manage_light import manage_light  # noqa: E402
+from blender_mcp.handlers.manage_mocap import manage_mocap  # noqa: E402
 from blender_mcp.handlers.manage_scene import _handle_open_file, _handle_save_file  # noqa: E402
 from blender_mcp.handlers.manage_sequencer import _get_sequences, manage_sequencer  # noqa: E402
 
@@ -145,6 +146,38 @@ try:
     if HeadlessOutput.exists():
         raise AssertionError("quarantined headless render created an output")
 
+    BvhText = """HIERARCHY
+ROOT Hips
+{
+    OFFSET 0 0 0
+    CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+    End Site
+    {
+        OFFSET 0 1 0
+    }
+}
+MOTION
+Frames: 1
+Frame Time: 0.0333333
+0 0 0 0 0 0
+"""
+    ReadBvh = ReadRoot / "walk.bvh"
+    OutsideBvh = OutsideRoot / "walk.bvh"
+    ReadBvh.write_text(BvhText, encoding="utf-8")
+    OutsideBvh.write_text(BvhText, encoding="utf-8")
+    ObjectsBeforeBvhDenial = len(bpy.data.objects)
+    DeniedBvh = manage_mocap(action="IMPORT_BVH", filepath=str(OutsideBvh))
+    if _ErrorCode(DeniedBvh) != "FILESYSTEM_PATH_OUTSIDE_ROOT":
+        raise AssertionError(f"outside BVH returned {DeniedBvh}")
+    if len(bpy.data.objects) != ObjectsBeforeBvhDenial:
+        raise AssertionError("denied BVH changed the scene")
+    ApprovedBvh = manage_mocap(action="IMPORT_BVH", filepath=str(ReadBvh))
+    if not ApprovedBvh.get("success"):
+        raise AssertionError(f"approved BVH failed: {ApprovedBvh}")
+    DeniedFbx = manage_mocap(action="IMPORT_FBX_ANIMATION", filepath="linked.fbx")
+    if _ErrorCode(DeniedFbx) != "INPUT_FAMILY_DISABLED":
+        raise AssertionError(f"FBX input-family quarantine returned {DeniedFbx}")
+
     try:
         ExportValidator.check_path_injection(
             str(OutsideRoot / "force.glb"),
@@ -188,7 +221,7 @@ try:
         raise AssertionError(f"approved open failed: {ApprovedOpen}")
 
     print(
-        "[BlenderMCP:FilesystemLive] PASS containment, overwrite, export, open, sequencer, HDRI, and headless quarantine",
+        "[BlenderMCP:FilesystemLive] PASS containment, export, imports, and quarantines",
         flush=True,
     )
 finally:

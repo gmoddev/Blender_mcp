@@ -9,7 +9,7 @@ Import, Cleanup, Retargeting, and Analysis of Mocap Data.
 High Mode Philosophy: Turn raw motion data into character soul.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import bpy
@@ -22,17 +22,37 @@ from ..dispatcher import register_handler
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
 from ..core.enums import MocapAction
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
 from ..core.resolver import resolve_name
 from ..core.thread_safety import ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3
+from ..utils.path import get_safe_path
 
 logger = get_logger()
+
+MocapCapabilities = {Action.value: [Capability.MUTATE.value] for Action in MocapAction}
+for ImportAction in (MocapAction.IMPORT_BVH, MocapAction.IMPORT_FBX_ANIMATION):
+    MocapCapabilities[ImportAction.value] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_READ.value,
+    ]
+
+
+def _FilesystemError(Action: str, Error: FilesystemPolicyError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_mocap",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
 
 
 @register_handler(
     "manage_mocap",
     actions=[a.value for a in MocapAction],
+    capabilities=MocapCapabilities,
     category="animation",
     schema={
         "type": "object",
@@ -117,15 +137,13 @@ def manage_mocap(action: Optional[str] = None, **params):  # type: ignore[no-unt
             message=f"Action '{action}' is defined but not yet implemented.",
         )
 
-    except Exception as e:
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.error("[BlenderMCP:Mocap] operation failed")
         return ResponseBuilder.error(
             handler="manage_mocap",
             action=action,
             error_code="EXECUTION_ERROR",
-            message=f"Mocap operation failed: {str(e)}",
+            message="The motion-capture operation failed",
         )
 
 
@@ -135,8 +153,6 @@ def manage_mocap(action: Optional[str] = None, **params):  # type: ignore[no-unt
 
 
 def _import_bvh(params):  # type: ignore[no-untyped-def]
-    import os as _os
-
     filepath = params.get("filepath")
     if not filepath:
         return ResponseBuilder.error(
@@ -146,22 +162,19 @@ def _import_bvh(params):  # type: ignore[no-untyped-def]
             message="filepath is required.",
         )
 
-    # Validate file exists BEFORE calling the operator — gives a clear error message
-    # instead of a cryptic FileNotFoundError from inside Blender's BVH importer.
-    if not _os.path.isfile(filepath):
-        return ResponseBuilder.error(
-            handler="manage_mocap",
-            action="IMPORT_BVH",
-            error_code="FILE_NOT_FOUND",
-            message=(
-                f"BVH file not found: {filepath!r}. "
-                "Provide a full absolute path to an existing .bvh file."
-            ),
+    try:
+        AuthorizedPath = get_safe_path(
+            filepath,
+            Access=FilesystemAccess.READ,
+            AllowedExtensions={".bvh"},
+            CreateParents=False,
         )
+    except FilesystemPolicyError as Error:
+        return _FilesystemError(MocapAction.IMPORT_BVH.value, Error)
 
     try:
         bpy.ops.import_anim.bvh(
-            filepath=filepath,
+            filepath=AuthorizedPath,
             global_scale=1.0,
             use_fps_scale=True,
             update_scene_fps=True,
@@ -172,40 +185,28 @@ def _import_bvh(params):  # type: ignore[no-untyped-def]
         return ResponseBuilder.success(
             handler="manage_mocap",
             action="IMPORT_BVH",
-            data={"object": obj.name if obj else "Unknown", "path": filepath},
+            data={"object": obj.name if obj else "Unknown", "path": AuthorizedPath},
             affected_objects=(
                 [{"name": obj.name, "type": "ARMATURE", "changes": ["imported"]}] if obj else []
             ),
         )
-    except Exception as e:
+    except Exception:
         return ResponseBuilder.error(
             handler="manage_mocap",
             action="IMPORT_BVH",
             error_code="EXECUTION_ERROR",
-            message=f"Failed to import BVH: {str(e)}",
+            message="Blender could not import the authorized BVH file",
         )
 
 
 def _import_fbx(params):  # type: ignore[no-untyped-def]
-    filepath = params.get("filepath")
-    if not filepath:
-        return ResponseBuilder.error(
-            handler="manage_mocap",
-            action="IMPORT_FBX_ANIMATION",
-            error_code="MISSING_PARAMETER",
-            message="filepath is required.",
-        )
-
-    try:
-        bpy.ops.import_scene.fbx(filepath=filepath, use_anim=True)
-        return {"success": True, "message": "Imported FBX Animation", "path": filepath}
-    except Exception as e:
-        return ResponseBuilder.error(
-            handler="manage_mocap",
-            action="IMPORT_FBX_ANIMATION",
-            error_code="EXECUTION_ERROR",
-            message=f"Failed to import FBX: {str(e)}",
-        )
+    del params
+    return ResponseBuilder.error(
+        handler="manage_mocap",
+        action=MocapAction.IMPORT_FBX_ANIMATION.value,
+        error_code="INPUT_FAMILY_DISABLED",
+        message="FBX animation import is disabled until every linked input is authorized",
+    )
 
 
 def _clean_noise(params):  # type: ignore[no-untyped-def]
@@ -244,9 +245,9 @@ def _clean_noise(params):  # type: ignore[no-untyped-def]
             # Use built-in operator
             bpy.ops.graph.clean(threshold=threshold, channels=False)
             return {"success": True, "message": f"Cleaned noise with threshold {threshold}"}
-        except Exception as e:
+        except Exception:
             # Fallback to per-fcurve manual cleaning if context fails
-            return {"success": False, "message": f"Context error: {str(e)}"}
+            return {"success": False, "message": "Graph cleanup could not run in this context"}
 
 
 def _smooth_curves(params):  # type: ignore[no-untyped-def]
@@ -265,12 +266,12 @@ def _smooth_curves(params):  # type: ignore[no-untyped-def]
     try:
         bpy.ops.graph.smooth()  # Simplest version
         return {"success": True, "message": "Smoothed curves"}
-    except Exception as e:
+    except Exception:
         return ResponseBuilder.error(
             handler="manage_mocap",
             action="SMOOTH_CURVES",
             error_code="EXECUTION_ERROR",
-            message=f"Failed to smooth curves: {str(e)}",
+            message="Blender could not smooth the selected curves",
         )
 
 
@@ -281,8 +282,8 @@ def _reduce_keyframes(params):  # type: ignore[no-untyped-def]
     try:
         bpy.ops.action.clean(threshold=ratio)  # This removes useless keys
         return {"success": True, "message": "Reduced keyframes"}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
+    except Exception:
+        return {"success": False, "message": "Blender could not reduce the selected keyframes"}
 
 
 def _retarget_to_rig(params):  # type: ignore[no-untyped-def]

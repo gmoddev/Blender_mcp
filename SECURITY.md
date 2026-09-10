@@ -101,8 +101,9 @@ and primary background rendering are disabled pending process, temporary-artifac
 complete output-family policy. Other render/capture paths, remaining imports/providers, sequencer
 preview outputs, other sidecars, atomic publication, and live cross-platform validation remain
 open. HDRI setup is read-root confined to `.hdr`/`.exr`, and legacy headless render entry points are
-disabled until compositor and scene-derived outputs can be authorized as a complete family. Other
-known gaps remain in external
+disabled until compositor and scene-derived outputs can be authorized as a complete family.
+Single-file motion-capture input is limited to authorized `.bvh`; FBX animation import is disabled
+until its linked inputs can be preauthorized. Other known gaps remain in external
 integration isolation, provider credential storage, download/archive limits,
 selector complexity, checkpoint recovery, and the remaining logging surface.
 These are scan targets, not accepted risks.

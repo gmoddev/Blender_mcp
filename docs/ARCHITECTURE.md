@@ -96,6 +96,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - Environment images are limited to authorized `.hdr`/`.exr` files and load before world mutation.
   Legacy in-process headless render helpers are disabled because mutable compositor state can
   produce outputs not represented by the caller's single path.
+- Motion-capture BVH files cross the central read-root boundary before Blender import. FBX animation
+  import remains disabled because the native importer can expand one primary file into a family of
+  content-selected external reads.
 
 ## Reference-Repositories Assessment
 
