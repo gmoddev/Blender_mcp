@@ -13,6 +13,8 @@ from blender_mcp.core.enums import (
     AdvancedBatchAction,
     CloudRenderAction,
     ExportAction,
+    HeadlessModeAction,
+    LightAction,
     RenderAction,
     SceneAction,
     SequencerAction,
@@ -31,12 +33,16 @@ from blender_mcp.handlers import manage_advanced_batch as AdvancedBatchModule
 from blender_mcp.handlers import manage_cloud_render as CloudRenderModule
 from blender_mcp.handlers import manage_export as StandardExportModule
 from blender_mcp.handlers import manage_export_pipeline as ExportPipelineModule
+from blender_mcp.handlers import manage_headless_mode as HeadlessHandlerModule
+from blender_mcp.handlers import manage_light as LightModule
 from blender_mcp.handlers import manage_rendering as RenderingModule
 from blender_mcp.handlers import manage_scene as SceneModule
 from blender_mcp.handlers import manage_sequencer as SequencerModule
 from blender_mcp.handlers import manage_uvs as UVModule
 from blender_mcp.handlers import unity_export as UnityModule
 import blender_mcp.core.export_pipeline as ExportCoreModule
+import blender_mcp.core.blender50_features as Blender50FeaturesModule
+import blender_mcp.core.headless_mode as HeadlessCoreModule
 
 
 load_handlers()
@@ -460,6 +466,151 @@ def test_sequencer_preview_output_family_is_quarantined(
     EnsureEditor.assert_not_called()
 
 
+def test_hdri_denies_outside_root_before_image_or_world_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ReadRoot = tmp_path / "environment"
+    ReadRoot.mkdir()
+    Outside = tmp_path / "outside.hdr"
+    Outside.write_bytes(b"environment")
+    ConfigureFilesystemPolicy(ReadRoot=ReadRoot)
+    LoadImage = MagicMock(side_effect=AssertionError("image should not be loaded"))
+    World = SimpleNamespace(use_nodes=False)
+    monkeypatch.setattr(
+        LightModule,
+        "bpy",
+        SimpleNamespace(
+            context=SimpleNamespace(scene=SimpleNamespace(world=World)),
+            data=SimpleNamespace(images=SimpleNamespace(load=LoadImage)),
+        ),
+    )
+
+    Result = LightModule.manage_light(
+        action=LightAction.SETUP_HDRI.value,
+        filepath=str(Outside),
+    )
+
+    assert Result["success"] is False
+    assert ErrorCode(Result) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    assert World.use_nodes is False
+    LoadImage.assert_not_called()
+
+
+def test_hdri_read_preserves_authorized_environment_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Environment = tmp_path / "studio.exr"
+    Environment.write_bytes(b"environment")
+    ConfigureFilesystemPolicy(ReadRoot=tmp_path)
+    Image = object()
+    LoadImage = MagicMock(return_value=Image)
+    Background = SimpleNamespace(
+        inputs={
+            "Color": object(),
+            "Strength": SimpleNamespace(default_value=None),
+        },
+        outputs={"Background": object(), "Color": object()},
+    )
+    Output = SimpleNamespace(inputs={"Surface": object()})
+    EnvironmentNode = SimpleNamespace(image=None, outputs={"Color": object()})
+    Nodes = MagicMock()
+    Nodes.new.side_effect = [Background, Output, EnvironmentNode]
+    Links = SimpleNamespace(new=MagicMock())
+    World = SimpleNamespace(
+        name="World",
+        use_nodes=False,
+        node_tree=SimpleNamespace(nodes=Nodes, links=Links),
+    )
+    monkeypatch.setattr(
+        LightModule,
+        "bpy",
+        SimpleNamespace(
+            context=SimpleNamespace(scene=SimpleNamespace(world=World)),
+            data=SimpleNamespace(
+                images=SimpleNamespace(load=LoadImage),
+                worlds=SimpleNamespace(new=MagicMock()),
+            ),
+        ),
+    )
+
+    Result = LightModule.manage_light(
+        action=LightAction.SETUP_HDRI.value,
+        filepath=str(Environment),
+        energy=2.0,
+    )
+
+    assert Result["success"] is True
+    assert World.use_nodes is True
+    assert EnvironmentNode.image is Image
+    assert Background.inputs["Strength"].default_value == 2.0
+    LoadImage.assert_called_once_with(str(Environment.resolve()), check_existing=True)
+
+
+def test_hdri_error_is_redacted_and_extension_is_restricted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Png = tmp_path / "secret-name.png"
+    Png.write_bytes(b"image")
+    Exr = tmp_path / "secret-name.exr"
+    Exr.write_bytes(b"environment")
+    ConfigureFilesystemPolicy(ReadRoot=tmp_path)
+    LoadImage = MagicMock(side_effect=RuntimeError(f"decoder leaked {Exr}"))
+    monkeypatch.setattr(
+        LightModule,
+        "bpy",
+        SimpleNamespace(
+            context=SimpleNamespace(scene=SimpleNamespace(world=None)),
+            data=SimpleNamespace(images=SimpleNamespace(load=LoadImage)),
+        ),
+    )
+
+    ExtensionResult = LightModule.manage_light(
+        action=LightAction.SETUP_HDRI.value,
+        filepath=str(Png),
+    )
+    LoadResult = LightModule.manage_light(
+        action=LightAction.SETUP_HDRI.value,
+        filepath=str(Exr),
+    )
+
+    assert ErrorCode(ExtensionResult) == "FILESYSTEM_EXTENSION_DENIED"
+    assert ErrorCode(LoadResult) == "EXECUTION_ERROR"
+    assert str(Exr) not in str(LoadResult)
+    LoadImage.assert_called_once_with(str(Exr.resolve()), check_existing=True)
+
+
+def test_headless_render_aliases_are_quarantined_before_scene_or_output_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    GetScene = MagicMock(side_effect=AssertionError("scene should not be accessed"))
+    monkeypatch.setattr(HeadlessHandlerModule, "BPY_AVAILABLE", True)
+    monkeypatch.setattr(
+        HeadlessHandlerModule,
+        "bpy",
+        SimpleNamespace(data=SimpleNamespace(scenes=SimpleNamespace(get=GetScene))),
+    )
+
+    HandlerResult = HeadlessHandlerModule.manage_headless_mode(
+        action=HeadlessModeAction.RENDER_HEADLESS.value,
+        scene_name="Scene",
+        output_path="outside.png",
+    )
+    CoreResult = HeadlessCoreModule.HeadlessModeManager.render_headless(
+        object(), "outside.png", 1
+    )
+    Blender50Result = Blender50FeaturesModule.HeadlessModeManager.render_headless(
+        object(), "outside.png", 1
+    )
+
+    assert ErrorCode(HandlerResult) == "OUTPUT_FAMILY_DISABLED"
+    assert CoreResult["code"] == "OUTPUT_FAMILY_DISABLED"
+    assert Blender50Result["code"] == "OUTPUT_FAMILY_DISABLED"
+    GetScene.assert_not_called()
+
+
 def test_render_execution_is_quarantined_before_scene_or_process_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -564,6 +715,12 @@ def test_filesystem_routes_declare_capabilities() -> None:
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
     assert HANDLER_METADATA["manage_sequencer"]["capabilities"][
         SequencerAction.RENDER_PREVIEW.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+    assert HANDLER_METADATA["manage_light"]["capabilities"][
+        LightAction.SETUP_HDRI.value
+    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
+    assert HANDLER_METADATA["manage_headless_mode"]["capabilities"][
+        HeadlessModeAction.RENDER_HEADLESS.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
     assert HANDLER_METADATA["manage_rendering"]["capabilities"][
         RenderAction.RENDER_FRAME.value

@@ -93,6 +93,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - Single viewport captures publish below the write root and return image data inline without JSON
   sidecars. Multi-output capture is disabled. Primary background render helpers are also disabled
   because output authority does not imply process launch or unmanaged temporary-scene authority.
+- Environment images are limited to authorized `.hdr`/`.exr` files and load before world mutation.
+  Legacy in-process headless render helpers are disabled because mutable compositor state can
+  produce outputs not represented by the caller's single path.
 
 ## Reference-Repositories Assessment
 

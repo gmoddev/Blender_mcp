@@ -28,7 +28,6 @@ except ImportError:
     bmesh: Any = None  # type: ignore[no-redef]
     mathutils = None
 
-from .context_manager_v3 import ContextManagerV3
 from .error_protocol import ErrorProtocol, create_error
 from .logging_config import get_logger
 
@@ -728,30 +727,12 @@ class HeadlessModeManager:
     def render_headless(
         scene: Any, output_path: str, frame: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Render in headless mode with proper setup.
-        """
-        try:
-            # Set output
-            scene.render.filepath = output_path
-
-            # Set frame if provided
-            if frame is not None:
-                scene.frame_set(frame)
-
-            # Disable audio (headless fix)
-            scene.render.use_audio = False
-
-            # Render
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                bpy.ops.render.render(write_still=True)
-
-            return {"success": True, "output": output_path, "frame": scene.frame_current}
-
-        except Exception as e:
-            return create_error(
-                ErrorProtocol.EXECUTION_ERROR, custom_message=f"Headless render failed: {str(e)}"
-            )
+        """Deny the version-specific alias until output-family policy exists."""
+        del scene, output_path, frame
+        return create_error(
+            "OUTPUT_FAMILY_DISABLED",
+            custom_message="Headless rendering is disabled until every derived output is authorized",
+        )
 
 
 # =============================================================================

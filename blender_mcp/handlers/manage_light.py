@@ -28,15 +28,35 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
 from ..core.enums import LightAction, LightType
+from ..core.filesystem_boundary import FilesystemAccess, FilesystemPolicyError
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
+from ..utils.path import get_safe_path
 from typing import cast
 
 logger = get_logger()
+
+HdriExtensions = {".exr", ".hdr"}
+LightCapabilities = {Action.value: [Capability.MUTATE.value] for Action in LightAction}
+LightCapabilities[LightAction.SETUP_HDRI.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_READ.value,
+]
+
+
+def _FilesystemError(Action: str, Error: FilesystemPolicyError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_light",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
 
 
 @register_handler(
     "manage_light",
     actions=[a.value for a in LightAction],
+    capabilities=LightCapabilities,
     category="general",
     priority=15,
     schema={
@@ -446,6 +466,26 @@ def manage_light(action: str | None = None, **params: Any) -> dict[str, Any]:
                 message="filepath is required for SETUP_HDRI",
             )
 
+        try:
+            AuthorizedPath = get_safe_path(
+                filepath,
+                Access=FilesystemAccess.READ,
+                AllowedExtensions=HdriExtensions,
+                CreateParents=False,
+            )
+        except FilesystemPolicyError as Error:
+            return _FilesystemError(LightAction.SETUP_HDRI.value, Error)
+
+        try:
+            Image = bpy.data.images.load(AuthorizedPath, check_existing=True)
+        except Exception:
+            return ResponseBuilder.error(
+                handler="manage_light",
+                action=LightAction.SETUP_HDRI.value,
+                error_code="EXECUTION_ERROR",
+                message="Blender could not load the authorized HDRI image",
+            )
+
         world = bpy.context.scene.world
         if not world:
             world = bpy.data.worlds.new("World")
@@ -458,17 +498,7 @@ def manage_light(action: str | None = None, **params: Any) -> dict[str, Any]:
         bg_node = tree.nodes.new(type="ShaderNodeBackground")
         out_node = tree.nodes.new(type="ShaderNodeOutputWorld")
         env_node = tree.nodes.new(type="ShaderNodeTexEnvironment")
-
-        try:
-            img = bpy.data.images.load(filepath, check_existing=True)
-            env_node.image = img
-        except Exception as e:
-            return ResponseBuilder.error(
-                handler="manage_light",
-                action=LightAction.SETUP_HDRI.value,
-                error_code="EXECUTION_ERROR",
-                message=f"Failed to load HDRI: {str(e)}",
-            )
+        env_node.image = Image
 
         tree.links.new(env_node.outputs["Color"], bg_node.inputs["Color"])
         tree.links.new(bg_node.outputs["Background"], out_node.inputs["Surface"])
@@ -488,7 +518,7 @@ def manage_light(action: str | None = None, **params: Any) -> dict[str, Any]:
         return ResponseBuilder.success(
             handler="manage_light",
             action=LightAction.SETUP_HDRI.value,
-            data={"world": world.name, "hdri_path": filepath},
+            data={"world": world.name, "hdri_path": AuthorizedPath},
         )
 
     return ResponseBuilder.error(

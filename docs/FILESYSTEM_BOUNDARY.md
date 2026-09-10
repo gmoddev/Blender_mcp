@@ -32,6 +32,7 @@ The first migrated source-to-sink family covers:
 - standard, pipeline, batch-variant, and Unity export routes;
 - UV layout export;
 - sequencer movie, sound, and still-image reads;
+- `.hdr` and `.exr` environment-image reads;
 - single viewport screenshot outputs;
 - cloud-render current-file saves.
 
@@ -52,6 +53,12 @@ scene to an unmanaged temporary `.blend` and launched a subprocess, so filesyste
 alone cannot authorize it. Re-enablement requires explicit process policy, a controlled temporary
 artifact root, credential scrubbing, cleanup, and complete frame-family authorization.
 
+The separate headless-render action and the version-specific direct helper also fail closed with
+`OUTPUT_FAMILY_DISABLED`. Although they accepted one output path, a render can write additional
+files through compositor File Output nodes and other mutable scene configuration. Those entry
+points remain unavailable until the entire output family can be enumerated and authorized before
+any scene mutation.
+
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
 The deprecated `force_export` input is denied and cannot skip resource or path policy.
@@ -66,7 +73,7 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Other rendering outputs, other imported assets, caches, temporary provider
+Other imported assets, bake/cache outputs, temporary provider
 artifacts, subprocess paths, and other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and
@@ -74,7 +81,8 @@ therefore fail closed, but their action metadata and sidecar behavior are not ye
 Windows unit coverage exercises traversal,
 sibling-prefix, ambiguous syntax, overwrite, and final-extension behavior. Blender 5.2.1 live
 validation passes outside-root open/save/export denial, sentinel preservation, approved overwrite,
-approved GLB export, approved `.blend` open, and a Windows junction escape. Supported POSIX and
+approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI denial,
+approved `.hdr` loading, and headless-render quarantine without an output file. Supported POSIX and
 broader live operator coverage remain required.
 
 Until those gates pass, use disposable `.blend` copies and treat Foundation 0E as partial.

@@ -266,37 +266,12 @@ class HeadlessModeManager:
     def render_headless(
         scene: Any, output_path: str, frame: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Execute headless render.
-        """
-        if not BPY_AVAILABLE:
-            return create_error(ErrorProtocol.NO_CONTEXT)
-
-        try:
-            # Set output
-            scene.render.filepath = output_path
-
-            # Set frame
-            if frame is not None:
-                scene.frame_set(frame)
-
-            # Execution
-            result = HeadlessModeManager.execute_safely(bpy.ops.render.render, write_still=True)
-
-            if "error" in result:
-                return result
-
-            return {
-                "success": True,
-                "output_path": output_path,
-                "frame": frame if frame is not None else scene.frame_current,
-                "engine": scene.render.engine,
-            }
-
-        except Exception as e:
-            return create_error(
-                ErrorProtocol.EXECUTION_ERROR, custom_message=f"Render failed: {str(e)}"
-            )
+        """Deny legacy rendering until its complete output family can be authorized."""
+        del scene, output_path, frame
+        return create_error(
+            "OUTPUT_FAMILY_DISABLED",
+            custom_message="Headless rendering is disabled until every derived output is authorized",
+        )
 
 
 class MemoryManager:

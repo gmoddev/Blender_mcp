@@ -26,6 +26,8 @@ from blender_mcp.core.filesystem_boundary import (  # noqa: E402
     FilesystemPolicyError,
     ResetFilesystemPolicy,
 )
+from blender_mcp.handlers.manage_headless_mode import manage_headless_mode  # noqa: E402
+from blender_mcp.handlers.manage_light import manage_light  # noqa: E402
 from blender_mcp.handlers.manage_scene import _handle_open_file, _handle_save_file  # noqa: E402
 from blender_mcp.handlers.manage_sequencer import _get_sequences, manage_sequencer  # noqa: E402
 
@@ -109,6 +111,40 @@ try:
     if not ApprovedImage.get("success"):
         raise AssertionError(f"approved sequencer image failed: {ApprovedImage}")
 
+    ReadHdri = ReadRoot / "studio.hdr"
+    OutsideHdri = OutsideRoot / "studio.hdr"
+    GeneratedHdri = bpy.data.images.new(
+        "BlenderMCPFilesystemLiveHDRI",
+        width=1,
+        height=1,
+        float_buffer=True,
+    )
+    GeneratedHdri.pixels = [0.25, 0.5, 0.75, 1.0]
+    GeneratedHdri.filepath_raw = str(ReadHdri)
+    GeneratedHdri.file_format = "HDR"
+    GeneratedHdri.save()
+    bpy.data.images.remove(GeneratedHdri)
+    shutil.copy2(ReadHdri, OutsideHdri)
+    WorldBeforeHdriDenial = bpy.context.scene.world
+    DeniedHdri = manage_light(action="SETUP_HDRI", filepath=str(OutsideHdri))
+    if _ErrorCode(DeniedHdri) != "FILESYSTEM_PATH_OUTSIDE_ROOT":
+        raise AssertionError(f"outside HDRI returned {DeniedHdri}")
+    if bpy.context.scene.world is not WorldBeforeHdriDenial:
+        raise AssertionError("denied HDRI changed the scene world")
+    ApprovedHdri = manage_light(action="SETUP_HDRI", filepath=str(ReadHdri))
+    if not ApprovedHdri.get("success"):
+        raise AssertionError(f"approved HDRI failed: {ApprovedHdri}")
+
+    HeadlessOutput = OutsideRoot / "headless.png"
+    DeniedHeadlessRender = manage_headless_mode(
+        action="RENDER_HEADLESS",
+        output_path=str(HeadlessOutput),
+    )
+    if _ErrorCode(DeniedHeadlessRender) != "OUTPUT_FAMILY_DISABLED":
+        raise AssertionError(f"headless render quarantine returned {DeniedHeadlessRender}")
+    if HeadlessOutput.exists():
+        raise AssertionError("quarantined headless render created an output")
+
     try:
         ExportValidator.check_path_injection(
             str(OutsideRoot / "force.glb"),
@@ -152,7 +188,7 @@ try:
         raise AssertionError(f"approved open failed: {ApprovedOpen}")
 
     print(
-        "[BlenderMCP:FilesystemLive] PASS containment, overwrite, export, open, and sequencer read",
+        "[BlenderMCP:FilesystemLive] PASS containment, overwrite, export, open, sequencer, HDRI, and headless quarantine",
         flush=True,
     )
 finally:

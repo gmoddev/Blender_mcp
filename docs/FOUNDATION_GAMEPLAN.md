@@ -147,6 +147,25 @@ treating a render output path as permission for both. Re-enablement belongs with
 credential scrubbing, controlled temporary artifacts, cleanup, process policy, and complete frame
 output-family grants. Other render managers and capture surfaces remain in the 0E sink audit.
 
+## Seventh Implementation Slice: Foundation 0E environment reads and headless render containment
+
+`manage_light.SETUP_HDRI` now declares `FILESYSTEM_READ`, accepts only existing `.hdr` or `.exr`
+files below the user-approved read root, and authorizes the final path before Blender loads the
+image or changes the scene world. Decoder failures return a fixed redacted error rather than
+including Blender's path-bearing exception text.
+
+The registered headless-render action and both direct legacy helpers are quarantined with
+`OUTPUT_FAMILY_DISABLED`. A single `output_path` cannot authorize compositor File Output nodes or
+other outputs derived from mutable scene state. Re-enablement requires preflight enumeration and
+authorization of the complete output family, overwrite decisions for every existing member, and
+negative tests proving that denial occurs before scene or render mutation.
+
+Blender 5.2.1 background validation passes both outside-root denial without world replacement and
+approved `.hdr` loading, and confirms that the registered headless render action creates no output.
+
+This remains partial 0E. The next slice audits remaining local imports, bake/cache outputs, provider
+artifacts, and internal temporary/log paths before the 0F network/download/archive boundary.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

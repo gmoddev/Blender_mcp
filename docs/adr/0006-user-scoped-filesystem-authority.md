@@ -39,12 +39,15 @@ Authorize the final concrete path immediately before the file sink:
 9. confine single viewport captures to the write root, remove implicit system-temp/JSON sidecar
    outputs, and quarantine multi-output captures. Quarantine primary background rendering until
    process and temporary-artifact authority are independently defined.
+10. authorize `.hdr` and `.exr` environment images before Blender loads the image or mutates the
+    world, and quarantine legacy headless render helpers until compositor and scene-derived output
+    families can be enumerated as a unit.
 
 Grant `FILESYSTEM_READ` and `FILESYSTEM_WRITE` only when the corresponding validated root exists.
 Safe Mode may combine `READ` with `FILESYSTEM_READ`, but it never gains `MUTATE` or filesystem
 writes. Remove the effect of `force_export`; a request setting it to true fails closed.
 
-The initial migration covers the scene/export source-to-sink family listed in
+The incremental migration covers the source-to-sink families listed in
 `docs/FILESYSTEM_BOUNDARY.md`. Other file surfaces remain open roadmap work and must not be inferred
 safe from this decision.
 

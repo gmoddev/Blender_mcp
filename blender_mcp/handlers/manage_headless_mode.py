@@ -15,6 +15,7 @@ from ..dispatcher import register_handler
 from ..core.parameter_validator import validated_handler
 from ..core.enums import HeadlessModeAction
 from ..core.response_builder import ResponseBuilder
+from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
 from ..core.headless_mode import HeadlessModeManager, MemoryManager, CI_CDManager
 from typing import Any
@@ -27,9 +28,28 @@ except ImportError:
     BPY_AVAILABLE = False
     bpy = None
 
+HeadlessModeCapabilities = {
+    Action.value: [Capability.MUTATE.value] for Action in HeadlessModeAction
+}
+HeadlessModeCapabilities[HeadlessModeAction.RENDER_HEADLESS.value] = [
+    Capability.MUTATE.value,
+    Capability.FILESYSTEM_WRITE.value,
+]
+
+
+def _HeadlessRenderDisabled() -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_headless_mode",
+        action=HeadlessModeAction.RENDER_HEADLESS.value,
+        error_code="OUTPUT_FAMILY_DISABLED",
+        message="Headless rendering is disabled until every derived output is authorized",
+    )
+
 
 @register_handler(
     "manage_headless_mode",
+    actions=[Action.value for Action in HeadlessModeAction],
+    capabilities=HeadlessModeCapabilities,
     schema={
         "type": "object",
         "properties": {
@@ -57,6 +77,9 @@ def manage_headless_mode(action: str | None = None, **params: Any) -> dict[str, 
             error_code="NO_CONTEXT",
             message="Blender context not available",
         )
+
+    if action == HeadlessModeAction.RENDER_HEADLESS.value:
+        return _HeadlessRenderDisabled()
 
     try:
         # Mode Detection
@@ -112,31 +135,6 @@ def manage_headless_mode(action: str | None = None, **params: Any) -> dict[str, 
                 )
 
             return CI_CDManager.validate_scene_for_batch(scene)
-
-        elif action == HeadlessModeAction.RENDER_HEADLESS.value:
-            scene_name = params.get("scene_name")
-            scene = bpy.data.scenes.get(scene_name) if scene_name else bpy.context.scene
-
-            if not scene:
-                return ResponseBuilder.error(
-                    handler="manage_headless_mode",
-                    action=action,
-                    error_code="OBJECT_INVALID",
-                    message=f"Scene not found: {scene_name}",
-                )
-
-            output_path = params.get("output_path")
-            if not output_path:
-                return ResponseBuilder.error(
-                    handler="manage_headless_mode",
-                    action=action,
-                    error_code="MISSING_PARAMETER",
-                    message="Missing required parameter: 'output_path'",
-                )
-
-            return HeadlessModeManager.render_headless(
-                scene, output_path, frame=params.get("frame")
-            )
 
         else:
             return ResponseBuilder.error(
