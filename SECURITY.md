@@ -95,9 +95,11 @@ The shared dispatcher queue now has timeout/cancellation tombstones, duplicate d
 in-process reconciliation, and truthful running-after-timeout states. Blender 5.2.1 validates
 same-bridge reconnect, response loss, cross-bridge status/cancel denial, and shutdown behavior.
 Process-restart durability and direct provider timer callbacks remain outside the ledger. The
-scene/export family now has a partial filesystem authority boundary. Multi-file glTF, USD
-texture sidecars, and external asset packing are disabled pending complete
-input/output-family grants. Single viewport captures are write-root confined; multi-output capture
+scene/export family now has a partial filesystem authority boundary. Single-file GLB conditionally
+authorizes every unpacked ordinary `FILE` image beneath the read root; complex image families fail
+closed regardless of packed state. Multi-file glTF, OBJ material sidecars, USD texture/world
+sidecars, and external asset packing are disabled pending complete input/output-family grants.
+Single viewport captures are write-root confined; multi-output capture
 and primary background rendering are disabled pending process, temporary-artifact, cleanup, and
 complete output-family policy. Other render/capture paths, remaining imports/providers, sequencer
 preview outputs, other sidecars, atomic publication, and live cross-platform validation remain
