@@ -25,9 +25,9 @@ means the invariant is required but not yet proven by the current implementation
 | INPUT-001 | Untrusted lengths, paths, URLs, schemas, and imported asset metadata are bounded and validated before use. | Boundary and traversal tests. | Partial |
 | EXT-001 | External provider actions cannot perform file, network, archive, timer, credential, temporary-artifact, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, bypass-input, and Blender-live tests. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven after Blender restart; provider functionality intentionally unavailable |
 | EXT-002 | External-integration status distinguishes saved configuration from operational availability, performs no external I/O, and does not read provider credentials. | Safe Mode status, credential-read canary, and truthful-field assertions. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven |
-| FS-001 | A migrated file action reaches a Blender/file sink only with a canonical regular-file path contained beneath the matching user-approved read or write root. | Traversal, sibling-prefix, link, Windows ambiguity, final-extension, direct-caller, and legitimate-path tests. | Partial: primary paths pass Windows coverage, but scene-derived exporter inputs and remaining file surfaces are not fully inventoried |
-| FS-002 | Existing outputs are not replaced unless overwrite is enabled locally; export actions with request-level overwrite intent require both decisions. | Sentinel-file and denied-operator tests. | Partial: primary destination overwrite checks pass; OBJ `.mtl` siblings and atomic publication remain unauthorized/unproven |
-| FS-003 | A scene-derived or content-selected input/output family remains unavailable until every member and destructive effect can be enumerated and authorized before mutation. | Registered/direct denial, sink-removal, scene-nonmutation, and sentinel tests. | Partial: several compound families are quarantined; GLB external inputs and the Blender 5.2 USD texture-mode contract require correction and live proof |
+| FS-001 | A migrated file action reaches a Blender/file sink only with a canonical regular-file path contained beneath the matching user-approved read or write root. | Traversal, sibling-prefix, link, Windows ambiguity, final-extension, direct-caller, and legitimate-path tests. | Partial: primary paths and GLB file-backed images pass Windows coverage; remaining file surfaces are not fully inventoried |
+| FS-002 | Existing outputs are not replaced unless overwrite is enabled locally; export actions with request-level overwrite intent require both decisions. | Sentinel-file and denied-operator tests. | Partial: primary destination overwrite checks pass and OBJ material sidecars are disabled; atomic publication remains unproven |
+| FS-003 | A scene-derived or content-selected input/output family remains unavailable until every member and destructive effect can be enumerated and authorized before mutation. | Registered/direct denial, sink-removal, scene-nonmutation, and sentinel tests. | Partial: GLB file images are preauthorized, complex image families are quarantined, and OBJ/USD sidecars are disabled and live-proven; other compound families remain |
 | ERROR-001 | Boundary failures return structured, redacted errors without modal or focus-stealing UI. | UI behavior review and error-contract tests. | Partial: protocol/auth structured; live UI pending |
 | REC-001 | After disconnect or indeterminate completion, a client can query execution state and reconcile scene state before retrying. | Disconnect/reconnect integration test. | Partial: same-bridge reconnect is isolated and reconciles in process; disconnect shutdown, process restart, and direct callbacks remain |
 | LIC-001 | Copied or adapted code retains required copyright and license notices with provenance. | Release checklist and dependency/source inventory. | Target |
@@ -50,10 +50,11 @@ means the invariant is required but not yet proven by the current implementation
 - The primary bridge/server/dispatcher log path is metadata-only; provider and job logging still
   require a repository-wide canary audit.
 - The scene/export family now uses explicit read/write roots and local overwrite approval. GLB is
-  single-file only, USD texture sidecars are off, and asset packing is quarantined pending per-input
-  read grants. Other file surfaces, sidecars, atomic publication, supported POSIX behavior, and
-  broader live Blender operators remain Foundation 0E work. Blender 5.2.1 passes its disposable
-  file-operator harness.
+  single-file only and conservatively preauthorizes every unpacked file image below the read root;
+  tiled, sequence, and movie image families remain disabled. OBJ material output, USD texture
+  copying, and USD world-material conversion are locked off. Asset packing remains quarantined.
+  Other file surfaces, atomic publication, supported POSIX behavior, and broader live Blender
+  operators remain Foundation 0E work. Blender 5.2.1 passes its disposable file-operator harness.
 - Sequencer media reads require a configured read root and action-specific media type before the
   editor is created. Preview rendering is quarantined until its derived output family is explicit.
 - Single viewport captures are write-root confined and final-sink revalidated. Multi-output capture

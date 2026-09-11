@@ -1117,12 +1117,12 @@ class SafeOperators:
         """Safe OBJ export."""
         if not BPY_AVAILABLE:
             return None
-        export_scene = getattr(bpy.ops, "export_scene", None)
-        if export_scene is not None and hasattr(export_scene, "obj"):
-            return execute_on_main_thread(export_scene.obj, filepath=filepath, **kwargs)
         wm_ops = getattr(bpy.ops, "wm", None)
         if wm_ops is not None and hasattr(wm_ops, "obj_export"):
             return execute_on_main_thread(wm_ops.obj_export, filepath=filepath, **kwargs)
+        export_scene = getattr(bpy.ops, "export_scene", None)
+        if export_scene is not None and hasattr(export_scene, "obj"):
+            return execute_on_main_thread(export_scene.obj, filepath=filepath, **kwargs)
         raise RuntimeError("No OBJ export operator available in this Blender build")
 
 

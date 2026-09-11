@@ -33,6 +33,7 @@ from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
 from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
+from ..core.export_pipeline import AuthorizeExternalImageInputs
 from ..utils.path import get_safe_path
 
 logger = get_logger()
@@ -557,6 +558,17 @@ def _export_batch_variants(params):  # type: ignore[no-untyped-def]
             message="One or more export formats are unsupported",
         )
 
+    if "GLTF" in formats:
+        try:
+            AuthorizeExternalImageInputs()
+        except Exception as Error:
+            return ResponseBuilder.error(
+                handler="manage_advanced_batch",
+                action="EXPORT_BATCH_VARIANTS",
+                error_code="GLB_INPUT_DENIED",
+                message=str(Error),
+            )
+
     ExportPlans = []
 
     for obj_name in objects:
@@ -605,7 +617,11 @@ def _export_batch_variants(params):  # type: ignore[no-untyped-def]
                 elif fmt == "FBX":
                     safe_ops.export_scene.fbx(filepath=filepath, use_selection=True)
                 elif fmt == "OBJ":
-                    safe_ops.wm.obj_export(filepath=filepath, export_selected_objects=True)
+                    safe_ops.wm.obj_export(
+                        filepath=filepath,
+                        export_selected_objects=True,
+                        export_materials=False,
+                    )
 
                 obj_exports["files"].append({"format": fmt, "path": filepath})
 

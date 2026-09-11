@@ -35,6 +35,76 @@ from .thread_safety import SafeOperators, ensure_main_thread
 logger = get_logger()
 
 
+@ensure_main_thread
+def AuthorizeExternalImageInputs() -> None:
+    """Authorize every file-backed Blender image before an exporter can read it.
+
+    The check deliberately over-approximates the images used by a selected-object
+    export. Blender exporter reachability changes between releases; authorizing
+    every external image datablock is safer than guessing which node graphs the
+    active exporter will traverse.
+    """
+    if not BPY_AVAILABLE:
+        return
+
+    Images = getattr(getattr(bpy, "data", None), "images", ())
+    for Image in Images:
+        Source = str(getattr(Image, "source", "GENERATED")).upper()
+        if Source in {"GENERATED", "VIEWER", "RENDER_RESULT"}:
+            continue
+        if Source != "FILE":
+            raise ValueError(
+                "GLB export is disabled for tiled, sequence, or movie image inputs "
+                "until the complete input family can be authorized"
+            )
+
+        # Packed state is only sufficient for ordinary FILE images. A nonempty
+        # packed_files collection does not prove every member of a complex image
+        # family is internal, so those families must be rejected above.
+        if getattr(Image, "packed_file", None) is not None:
+            continue
+        try:
+            if len(getattr(Image, "packed_files", ())) > 0:
+                continue
+        except Exception:
+            pass
+
+        FilePath = str(getattr(Image, "filepath", "")).strip()
+        if not FilePath:
+            raise ValueError("GLB export found a file-backed image without a usable path")
+        try:
+            AbsolutePath = bpy.path.abspath(FilePath, library=getattr(Image, "library", None))
+        except TypeError:
+            try:
+                AbsolutePath = bpy.path.abspath(FilePath)
+            except Exception as Error:
+                raise ValueError("GLB export could not resolve an external image path") from Error
+        except Exception as Error:
+            raise ValueError("GLB export could not resolve an external image path") from Error
+        GetFilesystemPolicy().RequirePath(str(AbsolutePath), FilesystemAccess.READ)
+
+
+def _GetUsdTextureSettings() -> Dict[str, Any]:
+    """Return version-correct settings that prevent USD texture sidecar writes."""
+    try:
+        Properties = set(bpy.ops.wm.usd_export.get_rna_type().properties.keys())
+    except Exception as Error:
+        raise RuntimeError("USD texture output policy could not be verified") from Error
+
+    Settings: Dict[str, Any] = {}
+    if "export_textures_mode" in Properties:
+        Settings["export_textures_mode"] = "KEEP"
+    elif "export_textures" in Properties:
+        Settings["export_textures"] = False
+    else:
+        raise RuntimeError("This Blender version has no supported USD texture output control")
+    if "overwrite_textures" in Properties:
+        Settings["overwrite_textures"] = False
+    if "convert_world_material" in Properties:
+        Settings["convert_world_material"] = False
+    return Settings
+
+
 def _MergeSafeExporterSettings(
     BaseSettings: Dict[str, Any],
     CustomSettings: Optional[Dict[str, Any]],
@@ -180,6 +250,16 @@ class GLTFExporter:
                 custom_settings,
                 {"export_format": "GLB"},
             )
+            PathDecision = GetFilesystemPolicy().RequirePath(
+                filepath,
+                FilesystemAccess.WRITE,
+                {".glb"},
+            )
+            filepath = cast(str, PathDecision.ResolvedPath)
+
+            # A GLB may embed bytes read from image paths stored in the scene.
+            # The output grant does not authorize those independent reads.
+            AuthorizeExternalImageInputs()
             PathDecision = GetFilesystemPolicy().RequirePath(
                 filepath,
                 FilesystemAccess.WRITE,
@@ -357,8 +437,6 @@ class USDExporter:
         "omniverse": {
             "export_materials": True,
             "generate_preview_surface": True,
-            "export_textures": False,
-            "overwrite_textures": False,
         },
         "maya": {"export_materials": True, "convert_to_cm": True, "export_maya_collections": True},
         "houdini": {"export_materials": True, "export_subdiv": True, "export_houdini_attrs": True},
@@ -386,10 +464,19 @@ class USDExporter:
             # Ensure filepath has correct extension
             if not filepath.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
                 filepath += ".usd"
+            for SettingName in (custom_settings or {}):
+                if SettingName in {
+                    "export_textures",
+                    "export_textures_mode",
+                    "overwrite_textures",
+                    "convert_world_material",
+                }:
+                    raise ValueError("Output-family custom exporter settings are not allowed")
+            TextureSettings = _GetUsdTextureSettings()
             settings = _MergeSafeExporterSettings(
                 USDExporter.PRESETS.get(preset, USDExporter.PRESETS["omniverse"]),
                 custom_settings,
-                {"export_textures": False, "overwrite_textures": False},
+                TextureSettings,
             )
             PathDecision = GetFilesystemPolicy().RequirePath(
                 filepath,
@@ -668,6 +755,10 @@ class BatchExporter:
             if presets is None:
                 presets = {}
 
+            NormalizedFormats = [Format.upper() for Format in formats]
+            if "GLB" in NormalizedFormats:
+                AuthorizeExternalImageInputs()
+
             results = []
             errors = []
 
@@ -679,7 +770,7 @@ class BatchExporter:
                 "OBJ": ".obj",
             }
 
-            for fmt in formats:
+            for fmt in NormalizedFormats:
                 fmt = fmt.upper()
                 Extension = ExtensionByFormat.get(fmt)
                 if Extension is None:
@@ -772,7 +863,7 @@ class BatchExporter:
                 SafeOperators.export_obj(
                     filepath=filepath,
                     export_selected_objects=True,
-                    export_materials=True,
+                    export_materials=False,
                     export_triangulated_mesh=False,
                     export_normals=True,
                     export_uv=True,
@@ -782,7 +873,7 @@ class BatchExporter:
                 SafeOperators.export_obj(
                     filepath=filepath,
                     use_selection=True,
-                    use_materials=True,
+                    use_materials=False,
                     use_triangles=False,
                     use_normals=True,
                     use_uvs=True,
@@ -938,6 +1029,7 @@ class ExportValidator:
 # =============================================================================
 
 __all__ = [
+    "AuthorizeExternalImageInputs",
     "GLTFExporter",
     "USDExporter",
     "AlembicExporter",

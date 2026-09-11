@@ -13,6 +13,7 @@ from blender_mcp.core.enums import (
     AdvancedBatchAction,
     CloudRenderAction,
     ExportAction,
+    ExportPipelineAction,
     HeadlessModeAction,
     LightAction,
     MocapAction,
@@ -21,7 +22,7 @@ from blender_mcp.core.enums import (
     SequencerAction,
     UVsAction,
 )
-from blender_mcp.core.export_pipeline import ExportValidator, GLTFExporter, USDExporter
+from blender_mcp.core.export_pipeline import BatchExporter, ExportValidator, GLTFExporter, USDExporter
 from blender_mcp.core.filesystem_boundary import ConfigureFilesystemPolicy, ResetFilesystemPolicy
 from blender_mcp.core.security import Capability, SecurityManager
 from blender_mcp.dispatcher import (
@@ -255,6 +256,101 @@ def test_gltf_rejects_multifile_extension_and_path_bearing_settings(
     Export.assert_not_called()
 
 
+def test_gltf_authorizes_external_images_before_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ReadRoot = tmp_path / "read"
+    WriteRoot = tmp_path / "write"
+    OutsideRoot = tmp_path / "outside"
+    for Directory in (ReadRoot, WriteRoot, OutsideRoot):
+        Directory.mkdir()
+    OutsideImage = OutsideRoot / "secret.png"
+    OutsideImage.write_bytes(b"not-an-image")
+    ConfigureFilesystemPolicy(ReadRoot=ReadRoot, WriteRoot=WriteRoot)
+    Image = SimpleNamespace(
+        source="FILE",
+        filepath=str(OutsideImage),
+        packed_file=None,
+        packed_files=[],
+        library=None,
+    )
+    monkeypatch.setattr(ExportCoreModule.bpy.data, "images", [Image])
+    monkeypatch.setattr(
+        ExportCoreModule.bpy,
+        "path",
+        SimpleNamespace(abspath=lambda FilePath, **_Kwargs: FilePath),
+    )
+    Export = MagicMock(side_effect=AssertionError("export operator should not run"))
+    monkeypatch.setattr(ExportCoreModule.SafeOperators, "export_gltf", Export)
+
+    Result = GLTFExporter.export(MagicMock(), [], str(WriteRoot / "nested" / "hero.glb"))
+
+    assert Result["code"] == "EXPORT_ERROR"
+    assert "outside the user-approved root" in Result["message"]
+    assert str(OutsideImage) not in Result["message"]
+    assert not (WriteRoot / "nested").exists()
+    Export.assert_not_called()
+
+
+@pytest.mark.parametrize("Source", ["TILED", "SEQUENCE", "MOVIE"])
+@pytest.mark.parametrize(
+    ("PackedFile", "PackedFiles"),
+    [(None, []), (object(), []), (None, [object()])],
+)
+def test_gltf_denies_unbounded_image_input_families_before_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    Source: str,
+    PackedFile: object | None,
+    PackedFiles: list[object],
+) -> None:
+    ConfigureFilesystemPolicy(ReadRoot=tmp_path, WriteRoot=tmp_path)
+    Image = SimpleNamespace(
+        source=Source,
+        filepath="tiles_<UDIM>.png",
+        packed_file=PackedFile,
+        packed_files=PackedFiles,
+    )
+    monkeypatch.setattr(ExportCoreModule.bpy.data, "images", [Image])
+    Export = MagicMock(side_effect=AssertionError("export operator should not run"))
+    monkeypatch.setattr(ExportCoreModule.SafeOperators, "export_gltf", Export)
+
+    Result = GLTFExporter.export(MagicMock(), [], str(tmp_path / "output" / "hero.glb"))
+
+    assert Result["code"] == "EXPORT_ERROR"
+    assert "complete input family" in Result["message"]
+    assert not (tmp_path / "output").exists()
+    Export.assert_not_called()
+
+
+def test_gltf_allows_packed_file_image_without_external_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ConfigureFilesystemPolicy(WriteRoot=tmp_path)
+    Image = SimpleNamespace(
+        source="FILE",
+        filepath=str(tmp_path.parent / "outside" / "unused.png"),
+        packed_file=object(),
+        packed_files=[],
+    )
+    monkeypatch.setattr(ExportCoreModule.bpy.data, "images", [Image])
+    monkeypatch.setattr(ExportCoreModule.ContextManagerV3, "deselect_all_objects", MagicMock())
+    monkeypatch.setattr(
+        ExportCoreModule.ContextManagerV3,
+        "temp_override",
+        lambda **_Kwargs: nullcontext(),
+    )
+    Export = MagicMock()
+    monkeypatch.setattr(ExportCoreModule.SafeOperators, "export_gltf", Export)
+
+    Result = GLTFExporter.export(MagicMock(), [], str(tmp_path / "hero.glb"))
+
+    assert Result["success"] is True
+    Export.assert_called_once()
+
+
 def test_usd_disables_texture_sidecars_and_path_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -262,6 +358,15 @@ def test_usd_disables_texture_sidecars_and_path_overrides(
     ConfigureFilesystemPolicy(WriteRoot=tmp_path)
     Export = MagicMock()
     monkeypatch.setattr(ExportCoreModule.SafeOperators, "export_usd", Export)
+    monkeypatch.setattr(
+        ExportCoreModule,
+        "_GetUsdTextureSettings",
+        lambda: {
+            "export_textures_mode": "KEEP",
+            "overwrite_textures": False,
+            "convert_world_material": False,
+        },
+    )
     monkeypatch.setattr(ExportCoreModule.ContextManagerV3, "deselect_all_objects", MagicMock())
     monkeypatch.setattr(
         ExportCoreModule.ContextManagerV3,
@@ -276,12 +381,96 @@ def test_usd_disables_texture_sidecars_and_path_overrides(
         str(tmp_path / "other.usd"),
         custom_settings={"relative_paths": True},
     )
+    ModeResult = USDExporter.export(
+        MagicMock(),
+        [],
+        str(tmp_path / "mode.usd"),
+        custom_settings={"export_textures_mode": "NEW"},
+    )
 
     assert Result["success"] is True
     assert PathResult["code"] == "EXPORT_ERROR"
+    assert ModeResult["code"] == "EXPORT_ERROR"
     assert Export.call_count == 1
-    assert Export.call_args.kwargs["export_textures"] is False
+    assert Export.call_args.kwargs["export_textures_mode"] == "KEEP"
     assert Export.call_args.kwargs["overwrite_textures"] is False
+    assert Export.call_args.kwargs["convert_world_material"] is False
+
+
+def test_obj_export_disables_material_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ConfigureFilesystemPolicy(WriteRoot=tmp_path)
+    Export = MagicMock()
+    monkeypatch.setattr(ExportCoreModule.SafeOperators, "export_obj", Export)
+    monkeypatch.setattr(ExportCoreModule.ContextManagerV3, "deselect_all_objects", MagicMock())
+    monkeypatch.setattr(
+        ExportCoreModule.ContextManagerV3,
+        "temp_override",
+        lambda **_Kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        ExportCoreModule.bpy.ops,
+        "wm",
+        SimpleNamespace(obj_export=MagicMock()),
+    )
+
+    Result = BatchExporter._export_obj([], str(tmp_path / "hero.obj"))
+
+    assert Result["success"] is True
+    assert Export.call_args.kwargs["export_materials"] is False
+
+
+def test_standard_and_advanced_obj_routes_disable_material_sidecars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ConfigureFilesystemPolicy(WriteRoot=tmp_path)
+    StandardExport = MagicMock()
+    AdvancedExport = MagicMock()
+    WmOps = SimpleNamespace(obj_export=MagicMock())
+    monkeypatch.setattr(StandardExportModule.bpy.ops, "wm", WmOps)
+    monkeypatch.setattr(StandardExportModule.SafeOperators, "export_obj", StandardExport)
+    monkeypatch.setattr(
+        StandardExportModule.ContextManagerV3,
+        "temp_override",
+        lambda **_Kwargs: nullcontext(),
+    )
+
+    StandardResult = StandardExportModule.manage_export(
+        action=ExportAction.EXPORT_OBJ.value,
+        filepath=str(tmp_path / "standard" / "hero.obj"),
+        safe_mode=False,
+    )
+
+    Obj = MagicMock()
+    Obj.name = "Hero"
+    monkeypatch.setattr(AdvancedBatchModule.bpy.data.objects, "get", MagicMock(return_value=Obj))
+    monkeypatch.setattr(
+        AdvancedBatchModule,
+        "safe_ops",
+        SimpleNamespace(wm=SimpleNamespace(obj_export=AdvancedExport)),
+    )
+    monkeypatch.setattr(
+        AdvancedBatchModule.ContextManagerV3,
+        "temp_override",
+        lambda **_Kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(AdvancedBatchModule.ContextManagerV3, "deselect_all_objects", MagicMock())
+
+    AdvancedResult = AdvancedBatchModule._export_batch_variants(
+        {
+            "objects": ["Hero"],
+            "base_path": str(tmp_path / "advanced"),
+            "formats": ["OBJ"],
+        }
+    )
+
+    assert StandardResult["success"] is True
+    assert StandardExport.call_args.kwargs["export_materials"] is False
+    assert AdvancedResult["success"] is True
+    assert AdvancedExport.call_args.kwargs["export_materials"] is False
 
 
 def test_force_export_no_longer_skips_geometry_guard(
@@ -771,7 +960,22 @@ def test_filesystem_routes_declare_capabilities() -> None:
     ]
     assert HANDLER_METADATA["manage_advanced_batch"]["capabilities"][
         AdvancedBatchAction.EXPORT_BATCH_VARIANTS.value
-    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+    ] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+    assert HANDLER_METADATA["manage_export"]["capabilities"][
+        ExportAction.EXPORT_GLTF.value
+    ] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+    assert HANDLER_METADATA["manage_export_pipeline"]["capabilities"][
+        ExportPipelineAction.EXPORT_GLTF.value
+    ] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
     assert HANDLER_METADATA["manage_uvs"]["capabilities"][UVsAction.EXPORT_LAYOUT.value] == [
         Capability.MUTATE.value,
         Capability.FILESYSTEM_WRITE.value,
@@ -812,6 +1016,24 @@ def test_filesystem_routes_declare_capabilities() -> None:
             Capability.MUTATE.value,
             Capability.FILESYSTEM_WRITE.value,
         ]
+
+
+def test_export_capabilities_defer_conditional_image_reads_to_path_policy(
+    tmp_path: Path,
+) -> None:
+    ConfigureFilesystemPolicy(WriteRoot=tmp_path)
+    ExportActions = (
+        ("manage_export", ExportAction.EXPORT_GLTF.value),
+        ("manage_export_pipeline", ExportPipelineAction.EXPORT_GLTF.value),
+        ("manage_export_pipeline", ExportPipelineAction.EXPORT_ALL_FORMATS.value),
+        ("manage_export_pipeline", ExportPipelineAction.EXPORT_GAMEDEV_READY.value),
+        ("manage_advanced_batch", AdvancedBatchAction.EXPORT_BATCH_VARIANTS.value),
+    )
+
+    for ToolName, ActionName in ExportActions:
+        Capabilities = HANDLER_METADATA[ToolName]["capabilities"][ActionName]
+        assert Capability.FILESYSTEM_READ.value not in Capabilities
+        assert SecurityManager.validate_action(ToolName, ActionName, Capabilities)
 
 
 def test_dispatcher_denies_missing_root_before_file_handler(

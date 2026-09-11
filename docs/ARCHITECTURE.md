@@ -72,13 +72,13 @@ The security module owns no `bpy` reference. Authorization preference changes de
 a server restart; future dynamic updates must publish a new snapshot from a main-thread callback.
 
 Secrets never appear in protocol logs or message previews. The control credential is outside Scene,
-but OS-backed storage is still required. Protocol session IDs are correlation controls after the
-handshake; version 1 does not claim per-frame cryptographic integrity.
+but OS-backed storage is still required. Protocol v2 binds a bridge-instance namespace and session
+identity into mutual-HMAC authentication; it does not claim per-frame cryptographic integrity.
 
 ## Migration Risks
 
-- Version 1 intentionally rejects legacy unversioned clients; add-on and bridge must be upgraded
-  together. This avoids the silent dual-protocol ambiguity reported upstream.
+- Protocol v2 intentionally rejects v1 and legacy unversioned clients; add-on and bridge must be
+  upgraded together. This avoids the silent dual-protocol ambiguity reported upstream.
 - Safe Mode now blocks every unaudited legacy structured action because it is conservatively
   classified `MUTATE`. The action audit will restore explicitly proven reads.
 - Existing consumers that call `recv_message()` must handle typed malformed/truncated/oversize
@@ -91,10 +91,12 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
   shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
 - Provider credentials remain Scene properties. Scene/export file sinks now use a central
-  user-scoped path authority. The destination boundary does not yet enumerate every scene-derived
-  exporter input: GLB materials can reference external images, OBJ material export can derive an
-  `.mtl` sibling, and the Blender 5.2 USD texture-mode lock needs correction and live proof.
-  Remaining file/network handlers, sidecars, and string-path TOCTOU prevent valuable-asset readiness.
+  user-scoped path authority. Every unpacked file-backed image is conservatively authorized before
+  GLB export; tiled/sequence/movie image families fail closed. OBJ material sidecars are disabled.
+  Blender 5.2 USD export uses the schema-confirmed `KEEP` mode with texture overwrite and
+  world-material conversion disabled, and live proof confirms no texture directory is produced.
+  Remaining file/network handlers, extension-defined inputs, atomic publication, and string-path
+  TOCTOU prevent valuable-asset readiness.
 - Sequencer media inputs are authorized before editor creation. Sequencer preview rendering is
   disabled until its frame-derived output family can be authorized as a unit.
 - Single viewport captures publish below the write root and return image data inline without JSON

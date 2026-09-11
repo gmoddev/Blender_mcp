@@ -10,13 +10,14 @@ except ImportError:
 from ..dispatcher import register_handler
 from ..core.parameter_validator import validated_handler
 from ..core.enums import ExportAction
-from ..core.thread_safety import ensure_main_thread
+from ..core.thread_safety import SafeOperators, ensure_main_thread
 from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.security import Capability
 from ..core.logging_config import get_logger
 from ..core.validation_utils import ValidationUtils
+from ..core.export_pipeline import AuthorizeExternalImageInputs
 from ..utils.error_handler import mcp_tool_handler
 from ..utils.path_validator import PathValidator
 from typing import Any
@@ -159,7 +160,10 @@ def SafeExportStrategy(use_selection=False, apply_modifiers=True):  # type: igno
     "manage_export",
     actions=[a.value for a in ExportAction],
     capabilities={
-        Action.value: [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
+        Action.value: [
+            Capability.MUTATE.value,
+            Capability.FILESYSTEM_WRITE.value,
+        ]
         for Action in ExportAction
     },
     category="general",
@@ -246,6 +250,17 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
             error_code="MULTI_FILE_EXPORT_DISABLED",
             message="Only single-file GLB export is enabled until sidecars are authorized",
         )
+
+    if action == ExportAction.EXPORT_GLTF.value:
+        try:
+            AuthorizeExternalImageInputs()
+        except Exception as Error:
+            return ResponseBuilder.error(
+                handler="manage_export",
+                action=action,
+                error_code="GLB_INPUT_DENIED",
+                message=str(Error),
+            )
 
     ExtensionsByAction = {
         ExportAction.EXPORT_GLTF.value: {".glb"},
@@ -354,11 +369,21 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
                     return {"format": "FBX"}
 
                 elif action == ExportAction.EXPORT_OBJ.value:
-                    safe_ops.export_scene.obj(
-                        filepath=filepath,
-                        use_selection=True,
-                        use_mesh_modifiers=True,
-                    )
+                    WmOps = getattr(bpy.ops, "wm", None) if BPY_AVAILABLE else None
+                    if WmOps is not None and hasattr(WmOps, "obj_export"):
+                        SafeOperators.export_obj(
+                            filepath=filepath,
+                            export_selected_objects=True,
+                            apply_modifiers=True,
+                            export_materials=False,
+                        )
+                    else:
+                        SafeOperators.export_obj(
+                            filepath=filepath,
+                            use_selection=True,
+                            use_mesh_modifiers=True,
+                            use_materials=False,
+                        )
                     return {"format": "OBJ"}
 
                 else:
@@ -389,17 +414,20 @@ def manage_export(action: str | None = None, **params: Any) -> dict[str, Any]:
                 elif action == ExportAction.EXPORT_FBX.value:
                     safe_ops.export_scene.fbx(filepath=filepath, use_selection=use_selection)
                 elif action == ExportAction.EXPORT_OBJ.value:
-                    try:
-                        # Blender 5.x+ new operator
-                        safe_ops.wm.obj_export(
+                    WmOps = getattr(bpy.ops, "wm", None) if BPY_AVAILABLE else None
+                    if WmOps is not None and hasattr(WmOps, "obj_export"):
+                        SafeOperators.export_obj(
                             filepath=filepath,
                             export_selected_objects=use_selection,
                             apply_modifiers=True,
+                            export_materials=False,
                         )
-                    except AttributeError:
-                        # Fallback for older Blender versions
-                        safe_ops.export_scene.obj(
-                            filepath=filepath, use_selection=use_selection, use_mesh_modifiers=True
+                    else:
+                        SafeOperators.export_obj(
+                            filepath=filepath,
+                            use_selection=use_selection,
+                            use_mesh_modifiers=True,
+                            use_materials=False,
                         )
 
             result = {"format": action.split("_")[1], "mode": "UNSAFE_FAST"}

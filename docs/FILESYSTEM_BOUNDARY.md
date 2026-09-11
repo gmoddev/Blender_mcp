@@ -38,11 +38,18 @@ The first migrated source-to-sink family covers:
 - cloud-render current-file saves.
 
 This slice authorizes only exporter outputs whose complete output family is known. glTF writes are
-single-file GLB only. Caller-supplied exporter settings cannot select paths or output families, FBX
-texture path mode is fixed to `STRIP`, and USD texture export/overwrite is forced off. Cloud asset
-packaging and SheepIt preparation are quarantined because Blender's pack operation can read every
-linked external asset; they remain disabled until each input can be enumerated and granted read
-authority before mutation. Sequencer preview rendering is likewise quarantined because animation
+single-file GLB only. Before any output directory is created, GLB routes conservatively enumerate
+every unpacked file-backed image datablock and require each path beneath the read root. Packed
+ordinary `FILE` images and generated images need no external read; tiled, sequence, and movie image
+families fail closed regardless of packed state until all members can be enumerated. Caller-supplied
+exporter settings cannot select paths or output families. OBJ material export is disabled so no
+`.mtl` sibling is derived, FBX texture path mode is fixed to `STRIP`, and USD uses the runtime
+operator schema to select the no-copy `KEEP` texture mode, locks overwrite off, and disables
+world-material conversion that otherwise creates an EXR sidecar.
+Cloud asset packaging and SheepIt preparation are quarantined because Blender's pack operation can
+read every linked external asset; they remain disabled until each input can be enumerated and
+granted read authority before mutation. Sequencer preview rendering is likewise quarantined because
+animation
 rendering derives a multi-file output family from mutable scene settings. Single viewport captures
 default to a unique `captures/` path below the write root, are reauthorized at the final OpenGL
 sink, and return base64 inline without a JSON sidecar. Multi-angle and multi-view captures are
@@ -79,9 +86,12 @@ Known provider-managed temporary artifacts are contained by quarantining every e
 Hyper3D, Sketchfab, and Poly Haven action. Retired download, temporary-directory, and import helpers
 are removed; no provider may treat the process temp directory as implicit filesystem authority.
 
-The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
-configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
-The deprecated `force_export` input is denied and cannot skip resource or path policy.
+The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for migrated actions with
+unconditional file effects. Conditional scene-derived GLB reads are authorized per path inside the
+main-thread exporter guard, allowing packed/generated-only GLB and non-GLB batch exports without an
+unused read-root requirement. A configured root grants only the matching dedicated capability; Safe
+Mode still permits no mutation. The deprecated `force_export` input is denied and cannot skip
+resource or path policy.
 
 ## Known Limits
 
@@ -93,17 +103,18 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Other imported assets, subprocess paths, and
-other exporter sidecars still need a repository-wide capability
-and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
-sharing authority with a primary output. Some legacy callers already reach the central helper and
-therefore fail closed, but their action metadata and sidecar behavior are not yet fully classified.
+Other imported assets, subprocess paths, and exporter sidecars still need a repository-wide
+capability and sink audit. Multi-file glTF, OBJ materials, and USD texture/world sidecars remain
+disabled rather than implicitly sharing authority with a primary output. GLB's conservative image
+inventory does not yet authorize tiled, sequence, or movie families, and does not claim to inventory
+every possible extension-defined exporter input.
 Windows unit coverage exercises traversal,
 sibling-prefix, ambiguous syntax, overwrite, and final-extension behavior. Blender 5.2.1 live
 validation passes outside-root open/save/export denial, sentinel preservation, approved overwrite,
-approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI/BVH denial,
-approved `.hdr` and BVH loading, and headless/FBX/physics-cache/texture-bake quarantine without
-filesystem side effects.
+approved GLB export, outside-root GLB image denial before output creation, single-file OBJ export,
+USD export without texture/world sidecars, approved `.blend` open, a Windows junction escape,
+outside-root HDRI/BVH denial, approved `.hdr` and BVH loading, and
+headless/FBX/physics-cache/texture-bake quarantine without filesystem side effects.
 Supported POSIX and broader live operator coverage remain required.
 
 Until those gates pass, use disposable `.blend` copies and treat Foundation 0E as partial.

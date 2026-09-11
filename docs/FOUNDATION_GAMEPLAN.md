@@ -241,9 +241,10 @@ This closes the known pre-queue THREAD-001 violation, while the repository-wide 
 open for independently callable execution utilities and other background paths.
 
 The same cross-layer review reopened two previously overbroad claims: request lifecycle identity was
-not isolated by authenticated bridge instance or JSON value type, and exporter authority does not
-yet cover every scene-derived input and output. The thirteenth slice closes the identity gap; the
-exporter authority gaps remain explicit 0E blockers.
+not isolated by authenticated bridge instance or JSON value type, and exporter authority did not
+cover every scene-derived input and output. The thirteenth slice closes the identity gap; the
+fourteenth closes the identified GLB-image, OBJ-material, and Blender 5.2 USD sidecar gaps without
+claiming complete exporter coverage.
 
 ## Thirteenth Implementation Slice: Foundation 0A/0D request identity isolation
 
@@ -258,6 +259,27 @@ Unit coverage proves proof tampering fails, typed IDs remain distinct, two bridg
 and internal ledger keys are not exposed in response metadata. The Blender-live lifecycle harness
 now uses same-bridge reconciliation and includes negative cross-bridge status/cancel checks. Process
 restart durability and complete disconnect shutdown semantics remain open under REC-001.
+
+## Fourteenth Implementation Slice: Foundation 0E exporter input/output authority
+
+Before creating an output directory or selecting objects, every GLB-capable route conservatively
+authorizes each unpacked file-backed Blender image beneath the read root. This conditional decision
+occurs at the per-image path boundary rather than the action capability gate, so packed ordinary
+`FILE` images, generated images, and non-GLB batch exports remain usable with write-only authority.
+Tiled, sequence, and movie image families fail closed regardless of packed state because a single
+path cannot authorize their complete member set. Direct, standard, pipeline, game-ready, and batch
+routes share or invoke the same guard.
+
+OBJ material export is locked off across the standard, pipeline, core-batch, and advanced-batch
+routes, so an approved `.obj` no longer implies authority for a derived `.mtl`. The main-thread OBJ
+wrapper prefers Blender's modern `wm.obj_export` operator before the removed legacy placeholder.
+
+USD texture policy is derived from the live operator schema. Blender 5.2 uses
+`export_textures_mode="KEEP"`, not the retired boolean; texture overwrite and world-material
+conversion are also locked off because the latter produced a derived EXR even in a factory scene.
+Blender 5.2.1 validation proves outside-root GLB image denial without output creation, approved GLB
+export, OBJ export without `.mtl`, and USD export without a texture directory. Atomic publication,
+extension-defined inputs, complex image families, and the remaining sink inventory keep 0E partial.
 
 ### Milestone 0: Baseline and scan readiness
 

@@ -18,7 +18,12 @@ RepoRoot = Path(__file__).resolve().parents[2]
 if str(RepoRoot) not in sys.path:
     sys.path.insert(0, str(RepoRoot))
 
-from blender_mcp.core.export_pipeline import ExportValidator, GLTFExporter  # noqa: E402
+from blender_mcp.core.export_pipeline import (  # noqa: E402
+    BatchExporter,
+    ExportValidator,
+    GLTFExporter,
+    USDExporter,
+)
 from blender_mcp.core.filesystem_boundary import (  # noqa: E402
     ConfigureFilesystemPolicy,
     FilesystemAccess,
@@ -87,11 +92,6 @@ try:
     if (OutsideRoot / "escape.glb").exists():
         raise AssertionError("outside export created a file")
 
-    InsideExport = GLTFExporter.export(bpy.context.scene, list(bpy.context.scene.objects), "mesh/hero")
-    ExpectedExport = WriteRoot / "mesh" / "hero.glb"
-    if not InsideExport.get("success") or not ExpectedExport.is_file():
-        raise AssertionError(f"approved export failed: {InsideExport}")
-
     PixelData = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
@@ -99,6 +99,50 @@ try:
     OutsideImage = OutsideRoot / "pixel.png"
     ReadImage.write_bytes(PixelData)
     OutsideImage.write_bytes(PixelData)
+    OutsideImageData = bpy.data.images.load(str(OutsideImage))
+    DeniedImageExport = GLTFExporter.export(
+        bpy.context.scene,
+        list(bpy.context.scene.objects),
+        "mesh/denied-image.glb",
+    )
+    if DeniedImageExport.get("code") != "EXPORT_ERROR":
+        raise AssertionError(f"outside GLB image input returned {DeniedImageExport}")
+    if (WriteRoot / "mesh" / "denied-image.glb").exists():
+        raise AssertionError("denied GLB image input created an output")
+    bpy.data.images.remove(OutsideImageData)
+
+    ApprovedImageData = bpy.data.images.load(str(ReadImage))
+    InsideExport = GLTFExporter.export(bpy.context.scene, list(bpy.context.scene.objects), "mesh/hero")
+    ExpectedExport = WriteRoot / "mesh" / "hero.glb"
+    if not InsideExport.get("success") or not ExpectedExport.is_file():
+        raise AssertionError(f"approved export failed: {InsideExport}")
+
+    ObjExport = BatchExporter._export_obj(
+        list(bpy.context.scene.objects),
+        str(WriteRoot / "mesh" / "hero.obj"),
+    )
+    if not ObjExport.get("success") or not (WriteRoot / "mesh" / "hero.obj").is_file():
+        raise AssertionError(f"single-file OBJ export failed: {ObjExport}")
+    if (WriteRoot / "mesh" / "hero.mtl").exists():
+        raise AssertionError("OBJ export created an unauthorized material sidecar")
+
+    UsdExport = USDExporter.export(
+        bpy.context.scene,
+        list(bpy.context.scene.objects),
+        str(WriteRoot / "mesh" / "hero.usd"),
+    )
+    if not UsdExport.get("success") or not (WriteRoot / "mesh" / "hero.usd").is_file():
+        raise AssertionError(f"USD texture-mode export failed: {UsdExport}")
+    if (WriteRoot / "mesh" / "textures").exists():
+        TextureMembers = [
+            str(PathEntry.relative_to(WriteRoot / "mesh"))
+            for PathEntry in (WriteRoot / "mesh" / "textures").rglob("*")
+        ]
+        raise AssertionError(
+            f"USD export created an unauthorized texture directory: {TextureMembers}"
+        )
+    bpy.data.images.remove(ApprovedImageData)
+
     EditorBeforeDenial = bpy.context.scene.sequence_editor
     HadEditorBeforeDenial = EditorBeforeDenial is not None
     StripCountBeforeDenial = len(_get_sequences(EditorBeforeDenial))

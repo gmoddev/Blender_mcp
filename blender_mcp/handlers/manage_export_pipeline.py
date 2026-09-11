@@ -15,7 +15,6 @@ from ..core.parameter_validator import validated_handler
 from ..core.enums import ExportPipelineAction
 from ..core.response_builder import ResponseBuilder
 from ..core.security import Capability
-from ..core.context_manager_v3 import ContextManagerV3
 from ..core.validation_utils import ValidationUtils
 from ..core.export_pipeline import (
     GLTFExporter,
@@ -24,9 +23,10 @@ from ..core.export_pipeline import (
     FBXExporter,
     BatchExporter,
     ExportValidator,
+    AuthorizeExternalImageInputs,
 )
 from ..core.versioning import BlenderCompatibility
-from ..core.thread_safety import ensure_main_thread, SafeOperators
+from ..core.thread_safety import ensure_main_thread
 from ..utils.error_handler import mcp_tool_handler
 from ..utils.path_validator import PathValidator
 
@@ -214,6 +214,32 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
         )
 
     scene = bpy.context.scene
+
+    GlbActions = {
+        ExportPipelineAction.EXPORT_GLTF.value,
+        ExportPipelineAction.EXPORT_GLTF_DRACO.value,
+    }
+    RequestedFormats = [
+        str(Format).upper()
+        for Format in params.get("formats", ["GLB", "FBX", "USD"])
+    ]
+    if action in GlbActions or (
+        action
+        in {
+            ExportPipelineAction.EXPORT_ALL_FORMATS.value,
+            ExportPipelineAction.EXPORT_GAMEDEV_READY.value,
+        }
+        and "GLB" in RequestedFormats
+    ):
+        try:
+            AuthorizeExternalImageInputs()
+        except Exception as Error:
+            return ResponseBuilder.error(
+                handler="manage_export_pipeline",
+                action=action,
+                error_code="GLB_INPUT_DENIED",
+                message=str(Error),
+            )
 
     # Zırhlı İhracat: Unified Pre-Flight Validation
     export_actions = {
@@ -476,42 +502,9 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
                     message=str(e),
                 )
 
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                ContextManagerV3.deselect_all_objects()
-                for obj in objects:
-                    obj.select_set(True)
-
-                # Blender 4.0 removed export_scene.obj → wm.obj_export with new param names.
-                # SafeOperators.export_obj detects which operator is available at runtime.
-                _wm_ops = getattr(bpy.ops, "wm", None) if BPY_AVAILABLE else None
-                if _wm_ops is not None and hasattr(_wm_ops, "obj_export"):
-                    SafeOperators.export_obj(
-                        filepath=filepath,
-                        export_selected_objects=True,
-                        export_materials=True,
-                        export_triangulated_mesh=False,
-                        export_normals=True,
-                        export_uv=True,
-                    )
-                else:
-                    SafeOperators.export_obj(
-                        filepath=filepath,
-                        use_selection=True,
-                        use_materials=True,
-                        use_triangles=False,
-                        use_normals=True,
-                        use_uvs=True,
-                    )
-
-            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-
-            return {
-                "success": True,
-                "format": "OBJ",
-                "filepath": filepath,
-                "file_size_mb": round(file_size / (1024 * 1024), 2),
-                "objects_exported": len(objects),
-            }
+            Result = BatchExporter._export_obj(objects, filepath)
+            Result["objects_exported"] = len(objects)
+            return Result
 
         # Game Dev Ready — multi-format batch export to a directory
         elif action == ExportPipelineAction.EXPORT_GAMEDEV_READY.value:
