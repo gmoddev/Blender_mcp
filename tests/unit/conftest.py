@@ -7,13 +7,17 @@ override these methods locally and continue to assert the production policy.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def PermissiveUnitSecurity(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Import after each test module has installed its Blender API doubles.
-    from blender_mcp.core.security import SecurityManager
+def PermissiveUnitSecurity() -> Iterator[None]:
+    # Import after each test module has installed its Blender API doubles. Exercise
+    # the production snapshot path instead of replacing its compatibility methods.
+    from blender_mcp.core.security import ConfigureSecurityPolicy, ResetSecurityPolicy
 
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: False))
-    monkeypatch.setattr(SecurityManager, "is_raw_code_enabled", staticmethod(lambda: True))
+    ConfigureSecurityPolicy(SafeMode=False, RawCodeEnabled=True)
+    yield
+    ResetSecurityPolicy()

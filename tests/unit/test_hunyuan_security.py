@@ -21,7 +21,7 @@ sys.modules.setdefault("bpy", BpyMock)
 sys.modules.setdefault("mathutils", MagicMock())
 
 from blender_mcp.core.enums import HunyuanAction  # noqa: E402
-from blender_mcp.core.security import Capability, SecurityManager  # noqa: E402
+from blender_mcp.core.security import Capability, ConfigureSecurityPolicy  # noqa: E402
 from blender_mcp.dispatcher import (  # noqa: E402
     HANDLER_METADATA,
     HANDLER_REGISTRY,
@@ -80,8 +80,7 @@ def test_dispatcher_denies_external_actions_before_handler_invocation(
 ) -> None:
     Handler = MagicMock(side_effect=AssertionError("quarantined handler was invoked"))
     monkeypatch.setitem(HANDLER_REGISTRY, "integration_hunyuan", Handler)
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: False))
-    monkeypatch.setattr(SecurityManager, "is_raw_code_enabled", staticmethod(lambda: True))
+    ConfigureSecurityPolicy(SafeMode=False, RawCodeEnabled=True)
 
     Result = dispatch_command(
         {
@@ -201,7 +200,7 @@ def test_hot_reload_purges_legacy_hunyuan_sinks() -> None:
 def test_status_remains_available_in_safe_mode_and_is_truthful(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: True))
+    ConfigureSecurityPolicy(SafeMode=True)
     monkeypatch.setattr(
         HunyuanModule.bpy.context.scene,
         "blendermcp_use_hunyuan3d",

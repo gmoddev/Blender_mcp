@@ -87,8 +87,9 @@ those interfaces by this repository remains in scope.
 
 Protocol v1 now implements bounded framing, mutual local authentication,
 correlation, active-client limits, metadata-only logging on the primary request
-path, and initial capability enforcement. These controls still require live
-Blender validation. The action-level capability audit is incomplete.
+path, and initial capability enforcement. Effective Safe Mode and raw-code state
+is snapshotted before listener startup so socket-thread authorization does not
+touch Blender APIs. The action-level capability audit is incomplete.
 
 The shared dispatcher queue now has timeout/cancellation tombstones, duplicate
 detection, bounded in-process reconciliation, and truthful running-after-timeout

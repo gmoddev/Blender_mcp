@@ -16,7 +16,7 @@ if str(RepoRoot) not in sys.path:
     sys.path.insert(0, str(RepoRoot))
 
 from blender_mcp import BlenderMCPServer, dispatcher  # noqa: E402
-from blender_mcp.core.security import Capability, SecurityManager  # noqa: E402
+from blender_mcp.core.security import Capability  # noqa: E402
 from blender_mcp.core.thread_safety import is_main_thread  # noqa: E402
 
 ProbeKey = "BlenderMcpLiveLifecycleCount"
@@ -24,8 +24,6 @@ ProbeKey = "BlenderMcpLiveLifecycleCount"
 
 # The disposable factory session has no saved add-on preferences. Permit only
 # this process's explicitly classified structured probe actions.
-SecurityManager.is_safe_mode = staticmethod(lambda: False)
-SecurityManager.is_raw_code_enabled = staticmethod(lambda: False)
 
 
 @dispatcher.register_handler(
@@ -83,6 +81,7 @@ Server = BlenderMCPServer(
     body_timeout=5.0,
     idle_timeout=30.0,
 )
+Server.GetSecurityPreferences = lambda: (False, False)  # type: ignore[method-assign]
 if not Server.start():
     raise RuntimeError("Disposable Blender MCP server failed to start")
 

@@ -228,6 +228,18 @@ deterministic artifact cleanup tied to the initiating request.
 This closes containment of the known provider temporary-artifact paths; it does not implement or
 approve external provider functionality.
 
+## Twelfth Implementation Slice: Foundation 0C main-thread policy snapshot
+
+Capability authorization no longer reads `bpy.context.preferences` on socket client threads.
+Server startup rejects worker-thread entry before touching Blender preferences, snapshots Safe Mode
+and raw-code enablement on Blender's main thread, and atomically publishes a frozen control-plane
+policy before opening the listener. Missing or malformed values fail closed, raw code cannot be
+effective while Safe Mode is enabled, and policy changes require a server restart.
+
+Unit and Blender-live canaries prove worker-thread authorization uses no Blender API reference.
+This closes the known pre-queue THREAD-001 violation, while the repository-wide thread audit remains
+open for independently callable execution utilities and other background paths.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

@@ -22,8 +22,10 @@ The bridge is ordinary Python. It owns MCP JSON-RPC parsing, one serialized sock
 authentication as the client, and response correlation. It must not import or call `bpy`.
 
 The add-on listener and client threads own sockets, frame parsing, authentication as the server,
-and command handoff. They must not perform Blender API work. The dispatcher validates and schedules;
-handlers that touch `bpy` execute through the Blender main-thread timer queue.
+and command handoff. They must not perform Blender API work. Before opening the listener, server
+startup snapshots Safe Mode and raw-code enablement on Blender's main thread into immutable,
+lock-protected control-plane state. The dispatcher authorizes from that snapshot and the existing
+filesystem-policy snapshot, then schedules handlers that touch `bpy` through the main-thread queue.
 
 `BlenderMCPServer.start()` initializes the shared lifecycle before opening the listener. Timer and
 dependency-handler registration occur only on Blender's main thread, the background health monitor
@@ -66,6 +68,8 @@ wire envelope, HMAC transcript, authentication state, session binding, and corre
 `BlenderMCPServer` owns instance/epoch identity, active socket capacity, revocation, and authenticated
 dispatch. `MCPBridge` owns the client session and poisons a socket after any ambiguous exchange.
 `core/security.py` owns capability policy; dispatcher metadata supplies action-level requirements.
+The security module owns no `bpy` reference. Authorization preference changes deliberately require
+a server restart; future dynamic updates must publish a new snapshot from a main-thread callback.
 
 Secrets never appear in protocol logs or message previews. The control credential is outside Scene,
 but OS-backed storage is still required. Protocol session IDs are correlation controls after the

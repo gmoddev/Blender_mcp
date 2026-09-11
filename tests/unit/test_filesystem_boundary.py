@@ -14,7 +14,7 @@ from blender_mcp.core.filesystem_boundary import (
     FilesystemPolicyError,
     ResetFilesystemPolicy,
 )
-from blender_mcp.core.security import Capability, SecurityManager
+from blender_mcp.core.security import Capability, ConfigureSecurityPolicy, SecurityManager
 from blender_mcp.utils.path_validator import PathValidator
 
 
@@ -165,7 +165,7 @@ def test_filesystem_capabilities_require_configured_roots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: False))
+    ConfigureSecurityPolicy(SafeMode=False)
     Required = [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
 
     assert not SecurityManager.validate_action("export", "WRITE", Required)
@@ -177,7 +177,7 @@ def test_safe_mode_allows_filesystem_reads_only_with_a_read_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: True))
+    ConfigureSecurityPolicy(SafeMode=True)
     Required = [Capability.READ.value, Capability.FILESYSTEM_READ.value]
 
     assert not SecurityManager.validate_action("scene", "OPEN", Required)

@@ -196,12 +196,27 @@ class BlenderMCPServer:
 
         try:
             from .core.session import ValidateAuthToken
-            from .core.filesystem_boundary import ConfigureFilesystemPolicy
-            from .core.thread_safety import ThreadSafety
+            from .core.filesystem_boundary import ConfigureFilesystemPolicy, FilesystemAccess
+            from .core.security import ConfigureSecurityPolicy
+            from .core.thread_safety import ThreadSafety, is_main_thread
+
+            # Preference reads are Blender API operations. Reject worker-thread startup
+            # before resolving any bpy-backed configuration, and reset ordinary
+            # control-plane state to fail-closed defaults while startup is assembled.
+            if not getattr(bpy, "is_mock", False) and not is_main_thread():
+                raise RuntimeError("Server startup must run on Blender's main thread")
+            ConfigureSecurityPolicy()
+            ConfigureFilesystemPolicy()
 
             self.AuthToken = ValidateAuthToken(self.GetAuthToken())
             ReadRoot, WriteRoot, AllowOverwrite = self.GetFilesystemPreferences()
-            ConfigureFilesystemPolicy(ReadRoot, WriteRoot, AllowOverwrite)
+            FilesystemPolicy = ConfigureFilesystemPolicy(ReadRoot, WriteRoot, AllowOverwrite)
+            SafeMode, RawCodeEnabled = self.GetSecurityPreferences()
+            ConfigureSecurityPolicy(SafeMode, RawCodeEnabled)
+            if FilesystemPolicy.HasRoot(FilesystemAccess.READ):
+                log_debug("[BlenderMCP:Security] Filesystem read capability configured")
+            if FilesystemPolicy.HasRoot(FilesystemAccess.WRITE):
+                log_debug("[BlenderMCP:Security] Filesystem write capability configured")
             if not self.IsLoopbackHost(self.host):
                 raise ValueError("Remote binding is disabled; use a loopback host")
             if not getattr(bpy, "is_mock", False) and not ThreadSafety().Start():
@@ -268,6 +283,22 @@ class BlenderMCPServer:
         except (AttributeError, KeyError, TypeError):
             pass
         return "", "", False
+
+    @staticmethod
+    def GetSecurityPreferences():
+        """Read authorization preferences on Blender's main thread before listening."""
+        try:
+            Addon: Any = bpy.context.preferences.addons.get(__package__)
+            if Addon:
+                Preferences = Addon.preferences
+                SafeValue = getattr(Preferences, "safe_mode", True)
+                RawValue = getattr(Preferences, "raw_code_enabled", False)
+                SafeMode = SafeValue if isinstance(SafeValue, bool) else True
+                RawCodeEnabled = RawValue if isinstance(RawValue, bool) else False
+                return SafeMode, RawCodeEnabled and not SafeMode
+        except (AttributeError, KeyError, TypeError):
+            pass
+        return True, False
 
     @staticmethod
     def IsLoopbackHost(Host):
@@ -568,7 +599,7 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         bool,
         BoolProperty(
             name="Safe Mode",
-            description="Prevent execution of arbitrary Python code. Recommended for shared environments.",
+            description="Prevent arbitrary Python execution after the MCP server restarts",
             default=True,
         ),
     )
@@ -577,7 +608,7 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         bool,
         BoolProperty(
             name="Allow Raw Python",
-            description="Allow unrestricted Python only while Safe Mode is off",
+            description="Allow unrestricted Python after restart only while Safe Mode is off",
             default=False,
         ),
     )
@@ -625,7 +656,7 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         box.prop(self, "filesystem_read_root", text="Filesystem Read Root")
         box.prop(self, "filesystem_write_root", text="Filesystem Write Root")
         box.prop(self, "allow_filesystem_overwrite", text="Allow File Overwrite (High Risk)")
-        box.label(text="Filesystem policy changes apply after server restart.", icon="INFO")
+        box.label(text="Authorization and filesystem changes apply after restart.", icon="INFO")
         if self.safe_mode:
             box.label(text="Read-only audited actions are allowed.", icon="CHECKMARK")
         else:

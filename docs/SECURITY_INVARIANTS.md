@@ -17,7 +17,7 @@ means the invariant is required but not yet proven by the current implementation
 | AUTH-003 | Credentials are high-entropy, rotatable, revocable, never logged, and stored with user-only access where supported. | Unit tests plus platform storage inspection. | Partial: rotation/revocation implemented; OS store pending |
 | AUTHZ-001 | Safe Mode permits only explicit reads; unknown/unclassified actions and structured mutations deny. | Policy and dispatcher matrix tests. | Partial: raw paths gated; action audit pending |
 | AUTHZ-002 | Raw Blender Python is documented and surfaced as arbitrary code execution, not a sandbox. | Schema/UI/docs assertions. | Implemented; live UI review pending |
-| THREAD-001 | Only Blender's main thread may call `bpy`; network and worker threads only enqueue work. | Thread assertions and live Blender tests. | Partial: shared lifecycle startup, execution, monitoring, and shutdown enforced; provider/background paths need repository-wide audit |
+| THREAD-001 | Only Blender's main thread may call `bpy`; network and worker threads only enqueue work. | Thread assertions and live Blender tests. | Partial: shared lifecycle and pre-queue authorization are main-thread safe; execution-engine and remaining background paths need repository-wide audit |
 | MUT-001 | Mutations serialize and expose `Pending`, `Running`, and a truthful terminal/indeterminate state. | Ordered execution tests. | Enforced on shared queue; direct provider jobs remain separate coverage |
 | PRIV-001 | Logs contain request IDs, action names, states, and timing, but never code, tokens, prompts, arbitrary params, or asset contents. | Capture-and-scan tests with canary secrets. | Partial: core request path fixed; all handlers pending audit |
 | PRIV-002 | No telemetry leaves the process and telemetry is not enabled or implied by default. | Static scan and network-isolation test. | Target |
@@ -37,8 +37,9 @@ means the invariant is required but not yet proven by the current implementation
 - `blender_mcp/core/thread_safety.py`: the shared queue tombstones pending timeouts/cancellations,
   retains running-after-timeout outcomes, deduplicates stable request IDs, and registers/removes its
   stable timer only on Blender's main thread. Blender 5.2.1 races pass; restart loss remains.
-- `blender_mcp/core/security.py`: initial capability enforcement is active, but unaudited structured
-  actions retain a conservative migration classification.
+- `blender_mcp/core/security.py`: capability enforcement reads an immutable policy snapshot and
+  retains no Blender API reference; unaudited structured actions keep a conservative migration
+  classification.
 - `blender_mcp/handlers/manage_scripting.py`: raw execution receives normal Python builtins.
 - Provider credentials remain ordinary Scene properties and temporary render copies still need
   deterministic secret scrubbing and cleanup.

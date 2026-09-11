@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from blender_mcp.core.enums import Hyper3DAction, PolyHavenAction, SketchfabAction
-from blender_mcp.core.security import Capability, SecurityManager
+from blender_mcp.core.security import Capability, ConfigureSecurityPolicy
 from blender_mcp.dispatcher import HANDLER_METADATA, HANDLER_REGISTRY, dispatch_command, load_handlers
 from blender_mcp.handlers import hyper3d_handler as Hyper3DModule
 from blender_mcp.handlers import polyhaven_handler as PolyHavenModule
@@ -130,8 +130,7 @@ def test_dispatcher_denies_external_provider_actions_before_invocation(
 ) -> None:
     DeniedHandler = MagicMock(side_effect=AssertionError("quarantined handler was invoked"))
     monkeypatch.setitem(HANDLER_REGISTRY, Case.Tool, DeniedHandler)
-    monkeypatch.setattr(SecurityManager, "is_safe_mode", staticmethod(lambda: False))
-    monkeypatch.setattr(SecurityManager, "is_raw_code_enabled", staticmethod(lambda: True))
+    ConfigureSecurityPolicy(SafeMode=False, RawCodeEnabled=True)
 
     for Action, Params in Case.ExternalParams.items():
         Result = dispatch_command(

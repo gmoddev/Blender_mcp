@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterable, cast
-
-import bpy
+from threading import RLock
+from typing import Iterable
 
 
 class Capability(str, Enum):
@@ -19,34 +19,61 @@ class Capability(str, Enum):
     CREDENTIAL_ACCESS = "CREDENTIAL_ACCESS"
 
 
+@dataclass(frozen=True)
+class EffectiveSecurityPolicy:
+    """Immutable authorization state safe for socket and worker threads."""
+
+    SafeMode: bool = True
+    RawCodeEnabled: bool = False
+    Generation: int = 0
+
+
+_PolicyLock = RLock()
+_ActivePolicy = EffectiveSecurityPolicy()
+
+
+def ConfigureSecurityPolicy(
+    SafeMode: bool = True,
+    RawCodeEnabled: bool = False,
+) -> EffectiveSecurityPolicy:
+    """Atomically replace the effective policy without retaining Blender objects."""
+    global _ActivePolicy
+    EffectiveSafeMode = SafeMode if isinstance(SafeMode, bool) else True
+    EffectiveRawCode = RawCodeEnabled if isinstance(RawCodeEnabled, bool) else False
+    if EffectiveSafeMode:
+        EffectiveRawCode = False
+    with _PolicyLock:
+        _ActivePolicy = EffectiveSecurityPolicy(
+            SafeMode=EffectiveSafeMode,
+            RawCodeEnabled=EffectiveRawCode,
+            Generation=_ActivePolicy.Generation + 1,
+        )
+        return _ActivePolicy
+
+
+def GetSecurityPolicy() -> EffectiveSecurityPolicy:
+    """Return the current immutable policy snapshot."""
+    with _PolicyLock:
+        return _ActivePolicy
+
+
+def ResetSecurityPolicy() -> None:
+    """Restore fail-closed defaults."""
+    ConfigureSecurityPolicy()
+
+
 class SecurityManager:
     """Enforce fail-closed capability policy from effective add-on preferences."""
 
     @staticmethod
     def is_safe_mode() -> bool:
-        """Return effective Safe Mode, defaulting to enabled on lookup failure."""
-        try:
-            MainPackage = __package__.split(".")[0]
-            if bpy.context.preferences and bpy.context.preferences.addons:
-                if MainPackage in bpy.context.preferences.addons:
-                    Addon = bpy.context.preferences.addons[MainPackage]
-                    return bool(cast(Any, Addon).preferences.safe_mode)
-            return True
-        except (AttributeError, KeyError, IndexError, TypeError):
-            return True
+        """Read effective Safe Mode without touching Blender state."""
+        return GetSecurityPolicy().SafeMode
 
     @staticmethod
     def is_raw_code_enabled() -> bool:
-        """Return explicit raw-code permission, defaulting to disabled."""
-        try:
-            MainPackage = __package__.split(".")[0]
-            if bpy.context.preferences and bpy.context.preferences.addons:
-                if MainPackage in bpy.context.preferences.addons:
-                    Addon = bpy.context.preferences.addons[MainPackage]
-                    return bool(cast(Any, Addon).preferences.raw_code_enabled)
-            return False
-        except (AttributeError, KeyError, IndexError, TypeError):
-            return False
+        """Read effective raw-code permission without touching Blender state."""
+        return GetSecurityPolicy().RawCodeEnabled
 
     @staticmethod
     def validate_action(
@@ -71,23 +98,24 @@ class SecurityManager:
         if not Required:
             return False
 
-        if SecurityManager.is_safe_mode():
-            Allowed = {Capability.READ}
-            from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
+        # One immutable snapshot governs the complete decision. Preference changes
+        # are published only during main-thread server startup, so a worker cannot
+        # observe Safe and Raw fields from different generations.
+        SecurityPolicy = GetSecurityPolicy()
+        from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
 
-            Policy = GetFilesystemPolicy()
-            if Policy.HasRoot(FilesystemAccess.READ):
+        FilesystemPolicy = GetFilesystemPolicy()
+        if SecurityPolicy.SafeMode:
+            Allowed = {Capability.READ}
+            if FilesystemPolicy.HasRoot(FilesystemAccess.READ):
                 Allowed.add(Capability.FILESYSTEM_READ)
             return Required.issubset(Allowed)
 
         Allowed = {Capability.READ, Capability.MUTATE}
-        from .filesystem_boundary import FilesystemAccess, GetFilesystemPolicy
-
-        Policy = GetFilesystemPolicy()
-        if Policy.HasRoot(FilesystemAccess.READ):
+        if FilesystemPolicy.HasRoot(FilesystemAccess.READ):
             Allowed.add(Capability.FILESYSTEM_READ)
-        if Policy.HasRoot(FilesystemAccess.WRITE):
+        if FilesystemPolicy.HasRoot(FilesystemAccess.WRITE):
             Allowed.add(Capability.FILESYSTEM_WRITE)
-        if SecurityManager.is_raw_code_enabled():
+        if SecurityPolicy.RawCodeEnabled:
             Allowed.add(Capability.EXECUTE_CODE)
         return Required.issubset(Allowed)

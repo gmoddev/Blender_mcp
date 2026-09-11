@@ -17,6 +17,7 @@ sys.modules.setdefault("bmesh", MagicMock())
 
 from blender_mcp import BlenderMCPServer  # noqa: E402
 from blender_mcp.core.filesystem_boundary import ResetFilesystemPolicy  # noqa: E402
+from blender_mcp.core.security import GetSecurityPolicy, ResetSecurityPolicy  # noqa: E402
 from blender_mcp.core.protocol import recv_message, send_message  # noqa: E402
 from blender_mcp.core.session import BuildEnvelope, MessageType  # noqa: E402
 from stdio_bridge import MCPBridge  # noqa: E402
@@ -138,6 +139,60 @@ def test_filesystem_preferences_are_user_scoped_and_typed() -> None:
             "C:/approved/write",
             True,
         )
+
+
+def test_security_preferences_are_snapshotted_and_typed() -> None:
+    Addon = MagicMock()
+    Addon.preferences.safe_mode = False
+    Addon.preferences.raw_code_enabled = True
+
+    with patch("blender_mcp.bpy.context.preferences.addons.get", return_value=Addon):
+        assert BlenderMCPServer.GetSecurityPreferences() == (False, True)
+
+    Addon.preferences.safe_mode = "false"
+    Addon.preferences.raw_code_enabled = 1
+    with patch("blender_mcp.bpy.context.preferences.addons.get", return_value=Addon):
+        assert BlenderMCPServer.GetSecurityPreferences() == (True, False)
+
+
+def test_listener_start_installs_effective_security_snapshot() -> None:
+    ResetSecurityPolicy()
+    Server = BlenderMCPServer(host="127.0.0.1", port=0, auth_token=TOKEN)
+    try:
+        with patch.object(Server, "GetSecurityPreferences", return_value=(False, True)):
+            assert Server.start()
+            Policy = GetSecurityPolicy()
+            assert Policy.SafeMode is False
+            assert Policy.RawCodeEnabled is True
+    finally:
+        Server.stop()
+        ResetSecurityPolicy()
+
+
+def test_worker_thread_start_fails_before_reading_blender_preferences() -> None:
+    Server = BlenderMCPServer(host="127.0.0.1", port=0, auth_token=TOKEN)
+    AuthRead = MagicMock(side_effect=AssertionError("worker startup read auth preferences"))
+    FilesystemRead = MagicMock(
+        side_effect=AssertionError("worker startup read filesystem preferences")
+    )
+    SecurityRead = MagicMock(
+        side_effect=AssertionError("worker startup read security preferences")
+    )
+    Server.GetAuthToken = AuthRead  # type: ignore[method-assign]
+    Server.GetFilesystemPreferences = FilesystemRead  # type: ignore[method-assign]
+    Server.GetSecurityPreferences = SecurityRead  # type: ignore[method-assign]
+
+    with (
+        patch("blender_mcp.bpy.is_mock", False),
+        patch("blender_mcp.core.thread_safety.is_main_thread", return_value=False),
+    ):
+        assert Server.start() is False
+
+    AuthRead.assert_not_called()
+    FilesystemRead.assert_not_called()
+    SecurityRead.assert_not_called()
+    assert Server.running is False
+    assert Server.socket is None
 
 
 def test_invalid_filesystem_root_prevents_listener_start() -> None:
