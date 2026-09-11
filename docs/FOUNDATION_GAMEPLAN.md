@@ -108,7 +108,8 @@ Scene `.blend` I/O, standard and pipeline exports, batch and Unity exports, UV l
 cloud current-file saves now enforce the boundary at their final path. Existing writes require a
 local overwrite preference, and export-pipeline replacements also require per-request intent.
 `force_export` is rejected instead of bypassing policy. Migrated dispatcher actions declare their
-dedicated filesystem capabilities. Multi-file glTF and USD texture sidecars are disabled; arbitrary
+unconditional filesystem capabilities, while conditional GLB image reads are authorized per path.
+Multi-file glTF, OBJ material sidecars, and USD texture/world sidecars are disabled; arbitrary
 path-bearing exporter settings are rejected. Cloud asset packaging is quarantined until linked
 inputs can be enumerated and authorized for read before Blender packs them.
 
@@ -340,20 +341,20 @@ Port behavior in small vertical slices, preserving source attribution where code
 Each slice includes schema validation, read/mutate classification, negative tests, Blender integration
 tests, structured output, and documented retry semantics.
 
-## First Issues to Open
+## Initial Issue Disposition
 
-| Priority | Issue | Evidence in current fork |
+| Initial priority | Issue | Current disposition |
 |---|---|---|
-| P0 | Prevent timed-out queued commands from executing | `core/thread_safety.py` sets `TIMEOUT` but leaves the command in the queue. |
-| P0 | Report running-after-timeout as indeterminate | The caller currently receives a plain `TimeoutError` regardless of whether execution began. |
-| P0 | Enforce Safe Mode | `core/security.py::validate_action()` always returns `True`. |
-| P0 | Stop logging arbitrary command parameters | Dispatcher/server debug paths include request content. |
-| P1 | Remove telemetry preference and legacy command | Add-on preferences default telemetry consent to enabled. |
-| P1 | Add peer authentication and rotation | Loopback TCP accepts an unauthenticated client. |
-| P1 | Add explicit frame-size limit | Framing exists, but the accepted payload must be bounded before allocation. |
-| P1 | Fix multi-mesh metarig center calculation | `manage_rigging.py` divides all bounding points by eight. |
-| P2 | Reconcile package license metadata | `LICENSE` says MIT while `pyproject.toml` says proprietary. |
-| P2 | Remove malformed historical comment block | `stdio_bridge.py` contains a large non-functional repair narrative. |
+| P0 | Prevent timed-out queued commands from executing | Fixed for the shared in-process queue by atomic tombstones; live lifecycle tests pass. |
+| P0 | Report running-after-timeout as indeterminate | Fixed with queryable `RUNNING_AFTER_TIMEOUT` and late terminal states. |
+| P0 | Enforce Safe Mode | Fixed for classified actions and all raw-code routes; the complete action audit remains open. |
+| P0 | Stop logging arbitrary command parameters | Primary paths use metadata-only logging; the repository-wide log/ACL audit remains open. |
+| P1 | Remove telemetry preference and legacy command | No active telemetry sender or runtime preference remains; network-isolation evidence is still required for `PRIV-002`. |
+| P1 | Add peer authentication and rotation | Protocol v2 mutual HMAC, user-scoped credential precedence, rotation, and socket revocation are live-tested. |
+| P1 | Add explicit frame-size limit | Fixed with pre-auth and normal-frame bounds plus JSON node/depth limits. |
+| P1 | Fix multi-mesh metarig center calculation | Open: `manage_rigging.py` still divides combined bounding points by eight. |
+| P2 | Reconcile package license metadata | Fixed: `LICENSE` and `pyproject.toml` both declare MIT. Release provenance inventory remains open. |
+| P2 | Remove malformed historical comment block | Fixed: the non-functional repair narrative is absent from `stdio_bridge.py`. |
 
 ## Scan and Change Gates
 

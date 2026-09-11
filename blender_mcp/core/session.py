@@ -105,7 +105,7 @@ def BuildEnvelope(
     SessionId: str,
     Payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Build the sole version-one wire envelope."""
+    """Build the sole protocol-v2 wire envelope."""
     Kind = MessageKind.value if isinstance(MessageKind, MessageType) else str(MessageKind)
     return {
         "protocol_version": PROTOCOL_VERSION,

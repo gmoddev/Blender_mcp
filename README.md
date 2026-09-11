@@ -1,4 +1,4 @@
-> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This fork retains 69 tool groups and 550+ actions while hardening the system toward a production-grade architecture. The current unit suite contains 535 tests.
+> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This fork currently registers 70 tool groups and 590 actions while hardening the system toward a production-grade architecture. The current unit suite collects 726 tests.
 
 ---
 
@@ -54,7 +54,7 @@ stdio_bridge.py              ← MCP bridge  [standard Python, runs outside Blen
        ▼
 Blender Addon                ← blender_mcp/__init__.py  [runs inside Blender]
   ├── dispatcher.py            Command router + handler registry (HANDLER_REGISTRY)
-  ├── handlers/                52 handler modules (manage_*.py)
+  ├── handlers/                56 Python modules, currently registering 70 tool groups
   │     manage_scene_comprehension.py   11-action scene intelligence suite
   │     manage_rendering.py             Render, screenshot, view control
   │     manage_scripting.py             unrestricted Python (separately gated)
@@ -111,7 +111,7 @@ uv sync --all-extras
 
 # Verify everything works (no Blender needed for tests)
 uv run pytest tests/unit -q
-# → 535 passed in ~1.6s
+# → 725 passed, 1 skipped
 ```
 
 `uv sync` creates `.venv/` in the project directory — your system Python stays clean.
@@ -269,7 +269,7 @@ Tool: get_server_status
     "status": "active",
     "blender_version": [5, 0, 0],
     "blender_language": "en_US",
-    "handler_count": 69,
+    "handler_count": 70,
     "next_step": "Call list_all_tools to see all available tools…"
   }
 ```
@@ -376,7 +376,7 @@ Captures the viewport as a base64 PNG the AI can directly see and reason about.
 
 ## Tool Tier System
 
-The AI context window would overflow if all 69 tools were listed in full detail every time. The tier system solves this:
+The AI context window would overflow if all 70 tools were listed in full detail every time. The tier system solves this:
 
 | Tier | Priority | Count | Format in `list_all_tools` |
 |------|----------|-------|---------------------------|
@@ -386,7 +386,7 @@ The AI context window would overflow if all 69 tools were listed in full detail 
 | **OPTIONAL** | 150+ | 4 | Listed last (external integrations) |
 
 ```python
-# Filter by intent — reduces 69 tools to ~15 relevant ones (77% fewer tokens)
+# Filter by intent — reduces 70 tools to ~15 relevant ones
 list_all_tools(intent="rig a character")
 list_all_tools(intent="physics simulation")
 list_all_tools(intent="export to Unity")
@@ -441,22 +441,22 @@ Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock
 integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 535 unit tests, ~1.6s
-uv run pytest --collect-only -q          # 583 total cases currently collected
+uv run pytest tests/unit -q              # 726 collected: 725 passed, 1 skipped
+uv run pytest --collect-only -q          # 774 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
 ```
 
 <details>
-<summary>Coverage map — 20 unit test files</summary>
+<summary>Coverage map — 27 unit test files</summary>
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
-| Protocol, authentication, transport, policy, and privacy | 5 files | 57 |
-| Dispatcher and bridge routing/validation | 3 files | 57 |
-| Existing handlers and core behavior | 12 files | 421 |
-| **Total** | **20 test files** | **535** |
+| Protocol, authentication, transport, policy, and privacy | 5 files | 69 |
+| Dispatcher and bridge routing/validation | 3 files | 63 |
+| Existing handlers and core behavior | 19 files | 594 |
+| **Total** | **27 test files** | **726** |
 
 </details>
 
@@ -490,7 +490,7 @@ make test-fast       # Unit tests only, stop on first failure
 <summary><strong>Tool inspection</strong></summary>
 
 ```bash
-make inspect-summary        # Compact table of all 69 tools
+make inspect-summary        # Compact table of all 70 tools
 make inspect-essential      # ESSENTIAL tier full detail
 uv run python scripts/inspect_tools.py --tool get_scene_graph
 uv run python scripts/inspect_tools.py --cat animation
@@ -598,7 +598,7 @@ Blender_mcp/
 │       ├── check_tool_groups.py     Tool group integrity
 │       └── lint_imports.py          Import architecture rules
 ├── tests/
-│   ├── unit/                        535 unit tests (20 files, no Blender needed)
+│   ├── unit/                        726 unit tests (27 files, no Blender needed)
 │   ├── integration/                 48 collected mock + live integration cases
 │   └── TESTS.md                     Test suite documentation
 ├── docs/

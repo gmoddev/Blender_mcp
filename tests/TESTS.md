@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **535** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **726** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **583** |
+| **Grand total collected** | | | **774** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -108,7 +108,7 @@ uv run pytest tests/unit/test_execution_engine.py -v
 
 ---
 
-### `test_dispatcher_deep.py` (27 tests)
+### `test_dispatcher_deep.py` (31 tests)
 Deep coverage for `dispatcher.py` — paths not covered by `test_dispatch_routing.py`.
 
 | Class | Tests | Coverage |
@@ -248,7 +248,7 @@ uv run pytest tests/unit/test_smoke.py -v
 
 ---
 
-### `test_engine.py` (8 tests)
+### `test_engine.py` (10 tests)
 MCP bridge JSON-schema validation layer + `execute_blender_code` blocking patterns.
 
 ```bash
@@ -266,8 +266,8 @@ uv run pytest tests/unit/test_manage_history.py -v
 
 ---
 
-### `test_security.py` (9 tests)
-Tests `SecurityManager` High Mode — all actions permitted.
+### `test_security.py` (11 tests)
+Tests `SecurityManager` action classification, Safe Mode enforcement, and raw-code gating.
 
 ```bash
 uv run pytest tests/unit/test_security.py -v
@@ -307,27 +307,34 @@ uv run pytest tests/integration/test_incident_replay_p11.py -v
 |------|-------|----------------|
 | `test_essential_tools.py` | 182 | 8 ESSENTIAL tier handlers |
 | `test_parameter_validator.py` | 59 | `core/parameter_validator.py` |
+| `test_filesystem_handlers.py` | 45 | Migrated filesystem-aware handlers |
 | `test_intent_router.py` | 34 | `core/intent_router.py` |
+| `test_bake_output_security.py` | 31 | Texture-bake output containment |
+| `test_dispatcher_deep.py` | 31 | `dispatcher.py` (deep paths) |
 | `test_execution_engine.py` | 30 | `core/execution_engine.py` |
-| `test_dispatcher_deep.py` | 27 | `dispatcher.py` (deep paths) |
 | `test_semantic_memory.py` | 24 | `core/semantic_memory.py` |
 | `test_job_manager.py` | 24 | `core/job_manager.py` |
+| `test_physics_cache_security.py` | 25 | Physics-cache quarantine |
+| `test_protocol.py` | 25 | `core/protocol.py` |
 | `test_dispatch_routing.py` | 22 | `dispatcher.py` (routing) |
 | `test_response_builder.py` | 20 | `core/response_builder.py` |
-| `test_protocol.py` | 25 | `core/protocol.py` |
+| `test_filesystem_boundary.py` | 20 | Canonical read/write-root policy |
+| `test_hunyuan_security.py` | 20 | Hunyuan containment boundary |
+| `test_authenticated_transport.py` | 17 | Authenticated loopback integration |
+| `test_thread_safety.py` | 17 | Command lifecycle and queue semantics |
+| `test_external_provider_security.py` | 15 | Provider quarantine boundary |
 | `test_registry_completeness.py` | 14 | Handler registry integrity |
+| `test_session.py` | 13 | Session authentication and correlation |
 | `test_error_protocol.py` | 12 | `core/error_protocol.py` |
+| `test_security.py` | 11 | `core/security.py` |
+| `test_engine.py` | 10 | MCP bridge validation |
 | `test_smoke.py` | 9 | Project structure sanity |
-| `test_engine.py` | 8 | MCP bridge validation |
 | `test_manage_history.py` | 8 | `handlers/manage_history.py` |
-| `test_security.py` | 9 | `core/security.py` |
 | `test_scene_graph_geo_center.py` | 5 | Geometry center computation |
-| `test_authenticated_transport.py` | 8 | Authenticated loopback integration |
-| `test_session.py` | 12 | Session authentication and correlation |
 | `test_logging_privacy.py` | 3 | Metadata-only logging |
-| **Unit total** | **535** | |
+| **Unit total** | **726** | 725 passed, 1 skipped in the documented baseline run |
 | Integration files | 48 | 24 mock plus 24 live Blender cases |
-| **Grand total collected** | **583** | |
+| **Grand total collected** | **774** | 749 passed, 25 skipped in the documented full run |
 
 ---
 

@@ -78,21 +78,20 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-    # Essential only - High Mode: Minimal restrictions
+    # Baseline syntax, undefined-name, import-order, and style checks.
     "E",      # pycodestyle errors
     "F",      # Pyflakes (syntax errors, undefined names)
     "I",      # isort (import sorting)
     "W",      # pycodestyle warnings
     
-    # High Mode: Security rules are INFO only, not blocking
-    # "S" rules disabled - we trust the user
+    # Security-specific Ruff rules remain non-blocking while the existing codebase is migrated.
 ]
 
 ignore = [
-    # High Mode: Everything allowed that doesn't break code
+    # Compatibility-oriented baseline; security enforcement lives in dedicated policy and tests.
     "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",  # Docstrings optional
-    "E501",     # Line length - who cares
-    "PLR2004",  # Magic values - freedom!
+    "E501",     # Line length is handled separately from correctness checks
+    "PLR2004",  # Existing handlers use domain constants inline
     "PLR0913",  # Too many args - handlers need them
     "PLR0915",  # Too many statements - complex workflows
     "PLR0912",  # Too many branches - complex logic OK
@@ -114,7 +113,7 @@ ignore = [
     "SIM",      # Simplifications - sometimes clarity > brevity
     "ARG",      # Unused args - API compatibility
     "RET",      # Return style - freedom
-    "SLF",      # Private access - High Mode
+    "SLF",      # Private access is used by compatibility and test helpers
     "FIX",      # FIXME/TODO markers - helpful
     "E722",     # Bare except - acceptable for fallbacks
     "I001",     # Import sorting - cosmetic
@@ -236,7 +235,7 @@ strict_optional = true
 [tool.pyright]
 pythonVersion = "3.10"
 pythonPlatform = "All"
-typeCheckingMode = "off"  # High Mode: Type checking disabled (too many false positives)
+typeCheckingMode = "off"  # Disabled until the Blender runtime typing baseline is actionable
 include = ["blender_mcp"]
 exclude = [
     "tests",
@@ -245,7 +244,7 @@ exclude = [
     "__pycache__",
 ]
 
-# High Mode: Minimal type checking - Blender runtime is dynamic
+# Minimal type checking while Blender runtime modules remain dynamically provided
 # All report* settings disabled to prevent noise
 reportMissingImports = "none"
 reportMissingTypeStubs = "none"
@@ -256,7 +255,7 @@ reportMissingTypeArgument = "none"
 reportInvalidTypeForm = "none"
 # reportWildcardImportsFromLibrary removed - not recognized by this pyright version
 reportUnusedImport = "none"
-reportUndefinedVariable = "none"  # High Mode: math, mathutils etc. are runtime-defined
+reportUndefinedVariable = "none"  # Blender and optional runtime modules are dynamically provided
 reportMissingModuleSource = "none"  # C-extension packages (psutil etc.) have no .py source
 reportUnusedExpression = "warning"
 

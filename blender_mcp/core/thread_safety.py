@@ -4,8 +4,8 @@ Thread Safety V2 for Blender MCP 1.0.0
 High-performance, event-driven thread safety for Blender MCP.
 Uses optimized queue + threading.Event for sub-second latency.
 
-High Mode Philosophy: Thread-safe execution without limiting functionality.
-Performance Target: <100ms latency for all operations.
+Security model: bounded, reconcilable lifecycle transitions with Blender work confined to its main
+thread. Latency targets never override cancellation, authorization, or state-integrity guarantees.
 """
 
 import functools

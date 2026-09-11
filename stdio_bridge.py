@@ -24,7 +24,7 @@ if sys.platform == "win32":
             sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-# Configure logging - STAFF+ DEBUGGING (Absolute Path)
+# Configure the bridge's metadata-only diagnostic log.
 log_file = os.path.join(tempfile.gettempdir(), "mcp_bridge_debug.log")
 logging.basicConfig(
     filename=log_file,

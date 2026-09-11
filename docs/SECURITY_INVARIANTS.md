@@ -74,7 +74,8 @@ means the invariant is required but not yet proven by the current implementation
   every external action declares its real dedicated capabilities and fails before retired network,
   local-file, download, temporary-artifact, credential, or Blender-import sinks.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
-- `pyproject.toml` and `LICENSE`: package metadata disagrees about the license.
+- Package metadata and `LICENSE` agree on MIT; the complete copied/adapted-source provenance and
+  release-notice inventory remains open under `LIC-001`.
 
 Status must only move to `Enforced` when a negative test proves the control and the relevant runtime
 path has been inspected. A passing happy-path test is not sufficient.
