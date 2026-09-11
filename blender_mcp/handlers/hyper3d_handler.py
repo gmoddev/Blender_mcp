@@ -1,215 +1,133 @@
-"""
-Hyper3D Integration Handler for Blender MCP 1.0.0
-Hyper3D Rodin / Tripo / Meshy API Integration
-"""
+"""Security boundary for the optional Hyper3D integration."""
+
+from typing import Any, Dict, Optional
 
 import bpy
 
-try:
-    import requests  # type: ignore[import-untyped]
-except ImportError:
-    requests = None
-
-from ..core.thread_safety import ensure_main_thread
-from ..dispatcher import register_handler
 from ..core.enums import Hyper3DAction
 from ..core.parameter_validator import validated_handler
+from ..core.security import Capability
+from ..core.thread_safety import ensure_main_thread
 from ..core.validation_utils import ValidationUtils
+from ..dispatcher import register_handler
+
+
+for LegacyUnsafeName in (
+    "requests",
+    "_create_job",
+    "_poll_job",
+    "_import_model",
+    "_create_job_rodin",
+    "_poll_rodin",
+    "_create_job_tripo",
+    "_poll_tripo",
+    "_create_job_meshy",
+    "_poll_meshy",
+):
+    globals().pop(LegacyUnsafeName, None)
+del LegacyUnsafeName
+
+
+Hyper3DCapabilities = {
+    Hyper3DAction.STATUS.value: [Capability.READ.value],
+    Hyper3DAction.GENERATE.value: [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_READ.value,
+        Capability.NETWORK.value,
+        Capability.CREDENTIAL_ACCESS.value,
+    ],
+    Hyper3DAction.CHECK_JOB.value: [
+        Capability.READ.value,
+        Capability.NETWORK.value,
+        Capability.CREDENTIAL_ACCESS.value,
+    ],
+    Hyper3DAction.IMPORT.value: [
+        Capability.MUTATE.value,
+        Capability.NETWORK.value,
+        Capability.FILESYSTEM_READ.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ],
+}
+ExternalActions = frozenset(
+    Action.value for Action in Hyper3DAction if Action is not Hyper3DAction.STATUS
+)
+ExternalCapabilityMessage = (
+    "Hyper3D external actions are disabled until purpose-scoped network, credential, "
+    "filesystem, download, content-validation, and provider job controls are available"
+)
 
 
 @register_handler(
     "integration_hyper3d",
+    actions=[Action.value for Action in Hyper3DAction],
+    capabilities=Hyper3DCapabilities,
     schema={
         "type": "object",
         "title": "Hyper3D Integration",
-        "description": "Hyper3D Rodin / Tripo / Meshy API Integration for 3D generation",
+        "description": (
+            "Inspect Hyper3D configuration. Generation, polling, and import actions are "
+            "quarantined by the security policy."
+        ),
         "properties": {
             "action": ValidationUtils.generate_enum_schema(Hyper3DAction, "Operation to perform"),
-            "prompt": {"type": "string", "description": "Text prompt for generation"},
-            "image_path": {"type": "string", "description": "Path to image for image-to-3D"},
-            "job_id": {"type": "string", "description": "Job ID for checking status"},
-            "model_url": {"type": "string", "description": "Model URL to import"},
+            "prompt": {"type": "string", "description": "Reserved while generation is disabled."},
+            "image_path": {
+                "type": "string",
+                "description": "Reserved while local-file upload is disabled.",
+            },
+            "job_id": {"type": "string", "description": "Reserved while polling is disabled."},
+            "model_url": {
+                "type": "string",
+                "description": "Reserved while caller-selected URL import is disabled.",
+            },
         },
         "required": ["action"],
     },
 )
-@validated_handler(actions=[a.value for a in Hyper3DAction])
+@validated_handler(actions=[Action.value for Action in Hyper3DAction])
 @ensure_main_thread
-def integration_hyper3d(action=None, **params):  # type: ignore[no-untyped-def]
-    """
-    Hyper3D Rodin / Tripo / Meshy API Integration.
-    """
+def integration_hyper3d(
+    action: Optional[str] = None, **params: Any
+) -> Dict[str, Any]:
+    """Return configuration status or deny quarantined external actions."""
+    del params
+
     if not action:
         return {"error": "Missing required parameter: 'action'", "code": "MISSING_ACTION"}
-
-    if action != Hyper3DAction.STATUS.value and requests is None:
-        return {
-            "error": "Optional dependency 'requests' is not installed",
-            "code": "DEPENDENCY_MISSING",
-            "dependency": "requests",
-        }
-
     if action == Hyper3DAction.STATUS.value:
         return _get_status()
-
-    if action == Hyper3DAction.GENERATE.value:
-        return _create_job(params.get("prompt"), params.get("image_path"))
-
-    if action == Hyper3DAction.CHECK_JOB.value:
-        return _poll_job(params.get("job_id"))
-
-    if action == Hyper3DAction.IMPORT.value:
-        return _import_model(params.get("model_url"))
-
+    if action in ExternalActions:
+        return {
+            "error": ExternalCapabilityMessage,
+            "code": "EXTERNAL_CAPABILITY_DISABLED",
+            "action": action,
+            "retry_safe": False,
+        }
     return {"error": f"Unknown action: {action}", "code": "UNKNOWN_ACTION"}
 
 
-def _get_status():  # type: ignore[no-untyped-def]
-    """Get integration status."""
+def _get_status() -> Dict[str, Any]:
+    """Report saved configuration without reading any Scene-stored API key."""
     try:
-        enabled = getattr(bpy.context.scene, "blendermcp_use_hyper3d", False)
-        service = getattr(bpy.context.scene, "blendermcp_hyper3d_service", "RODIN")
+        ConfiguredEnabled = bool(
+            getattr(bpy.context.scene, "blendermcp_use_hyper3d", False)
+        )
+        Mode = getattr(bpy.context.scene, "blendermcp_hyper3d_mode", "RODIN")
         return {
             "success": True,
-            "enabled": enabled,
-            "service": service,
-            "message": "Hyper3D Integration Active" if enabled else "Hyper3D Integration Disabled",
+            "enabled": ConfiguredEnabled,
+            "configured_enabled": ConfiguredEnabled,
+            "authenticated": False,
+            "operational": False,
+            "external_actions_available": False,
+            "mode": Mode,
+            "message": (
+                "Hyper3D configuration is enabled, but external actions are disabled by "
+                "security policy"
+                if ConfiguredEnabled
+                else "Hyper3D configuration is disabled; external actions are also disabled "
+                "by security policy"
+            ),
         }
-    except Exception as e:
-        return {"error": f"Failed to get status: {str(e)}", "code": "STATUS_ERROR"}
-
-
-def _create_job(prompt, image):  # type: ignore[no-untyped-def]
-    """Create generation job."""
-    try:
-        service = bpy.context.scene.blendermcp_hyper3d_service  # type: ignore[attr-defined]
-        if service == "RODIN":
-            return _create_job_rodin(prompt, image)
-        elif service == "TRIPO":
-            return _create_job_tripo(prompt, image)
-        elif service == "MESHY":
-            return _create_job_meshy(prompt, image)
-        return {"error": f"Unknown service: {service}", "code": "UNKNOWN_SERVICE"}
-    except Exception as e:
-        return {"error": f"Failed to create job: {str(e)}", "code": "JOB_CREATE_ERROR"}
-
-
-def _poll_job(job_id):  # type: ignore[no-untyped-def]
-    """Poll job status."""
-    if not job_id:
-        return {"error": "Job ID required", "code": "MISSING_JOB_ID"}
-
-    try:
-        service = bpy.context.scene.blendermcp_hyper3d_service  # type: ignore[attr-defined]
-        if service == "RODIN":
-            return _poll_rodin(job_id)
-        elif service == "TRIPO":
-            return _poll_tripo(job_id)
-        elif service == "MESHY":
-            return _poll_meshy(job_id)
-        return {"error": f"Unknown service: {service}", "code": "UNKNOWN_SERVICE"}
-    except Exception as e:
-        return {"error": str(e), "code": "POLL_ERROR"}
-
-
-def _import_model(model_url):  # type: ignore[no-untyped-def]
-    """Import model from URL."""
-    if not model_url:
-        return {"error": "Model URL required", "code": "MISSING_URL"}
-
-    try:
-        # Download and import logic
-        return {"success": True, "message": "Model import initiated", "url": model_url}
-    except Exception as e:
-        return {"error": str(e), "code": "IMPORT_ERROR"}
-
-
-# Rodin API
-
-
-def _create_job_rodin(prompt, image):  # type: ignore[no-untyped-def]
-    """Create job via Rodin API."""
-    key = bpy.context.scene.blendermcp_hyper3d_rodin_key  # type: ignore[attr-defined]
-    url = "https://hyperhuman.deemos.com/v2/models"
-    headers = {"Authorization": f"Bearer {key}"}
-    files = {}
-    data = {}
-    if prompt:
-        data["text"] = prompt
-    if image:
-        files["image"] = open(image, "rb")
-    try:
-        resp = requests.post(url, headers=headers, data=data, files=files)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "RODIN_ERROR"}
-
-
-def _poll_rodin(job_id):  # type: ignore[no-untyped-def]
-    """Poll Rodin job."""
-    key = bpy.context.scene.blendermcp_hyper3d_rodin_key  # type: ignore[attr-defined]
-    url = f"https://hyperhuman.deemos.com/v2/models/{job_id}"
-    headers = {"Authorization": f"Bearer {key}"}
-    try:
-        resp = requests.get(url, headers=headers)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "RODIN_POLL_ERROR"}
-
-
-# Tripo API
-
-
-def _create_job_tripo(prompt, image):  # type: ignore[no-untyped-def]
-    """Create job via Tripo API."""
-    key = bpy.context.scene.blendermcp_hyper3d_tripo_key  # type: ignore[attr-defined]
-    url = "https://api.tripo3d.ai/v1/task"
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    data = {"type": "model_generation"}
-    if prompt:
-        data["text"] = prompt
-    try:
-        resp = requests.post(url, headers=headers, json=data)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "TRIPO_ERROR"}
-
-
-def _poll_tripo(job_id):  # type: ignore[no-untyped-def]
-    """Poll Tripo job."""
-    key = bpy.context.scene.blendermcp_hyper3d_tripo_key  # type: ignore[attr-defined]
-    url = f"https://api.tripo3d.ai/v1/task/{job_id}"
-    headers = {"Authorization": f"Bearer {key}"}
-    try:
-        resp = requests.get(url, headers=headers)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "TRIPO_POLL_ERROR"}
-
-
-# Meshy API
-
-
-def _create_job_meshy(prompt, image):  # type: ignore[no-untyped-def]
-    """Create job via Meshy API."""
-    key = bpy.context.scene.blendermcp_hyper3d_meshy_key  # type: ignore[attr-defined]
-    url = "https://api.meshy.ai/v2/text-to-3d"
-    headers = {"Authorization": f"Bearer {key}"}
-    data = {"text": prompt} if prompt else {}
-    try:
-        resp = requests.post(url, headers=headers, json=data)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "MESHY_ERROR"}
-
-
-def _poll_meshy(job_id):  # type: ignore[no-untyped-def]
-    """Poll Meshy job."""
-    key = bpy.context.scene.blendermcp_hyper3d_meshy_key  # type: ignore[attr-defined]
-    url = f"https://api.meshy.ai/v2/{job_id}"
-    headers = {"Authorization": f"Bearer {key}"}
-    try:
-        resp = requests.get(url, headers=headers)
-        return {"success": True, "data": resp.json()}
-    except Exception as e:
-        return {"error": str(e), "code": "MESHY_POLL_ERROR"}
+    except (AttributeError, TypeError):
+        return {"error": "Failed to get Hyper3D configuration status", "code": "STATUS_ERROR"}

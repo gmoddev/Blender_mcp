@@ -23,8 +23,8 @@ means the invariant is required but not yet proven by the current implementation
 | PRIV-002 | No telemetry leaves the process and telemetry is not enabled or implied by default. | Static scan and network-isolation test. | Target |
 | SUPPLY-001 | Runtime code never silently replaces itself from a remote branch. Updates are explicit and artifacts are pinned. | Static scan and release tests. | Target |
 | INPUT-001 | Untrusted lengths, paths, URLs, schemas, and imported asset metadata are bounded and validated before use. | Boundary and traversal tests. | Partial |
-| EXT-001 | Hunyuan external actions cannot perform file, network, archive, timer, credential, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, and bypass-input tests. | Enforced by quarantine after Blender restart; provider functionality intentionally unavailable |
-| EXT-002 | External-integration status distinguishes saved configuration from operational availability and performs no external I/O. | Safe Mode status and truthful-field assertions. | Enforced for Hunyuan |
+| EXT-001 | External provider actions cannot perform file, network, archive, timer, credential, temporary-artifact, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, bypass-input, and Blender-live tests. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven after Blender restart; provider functionality intentionally unavailable |
+| EXT-002 | External-integration status distinguishes saved configuration from operational availability, performs no external I/O, and does not read provider credentials. | Safe Mode status, credential-read canary, and truthful-field assertions. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven |
 | FS-001 | A migrated file action reaches a Blender/file sink only with a canonical regular-file path contained beneath the matching user-approved read or write root. | Traversal, sibling-prefix, link, Windows ambiguity, final-extension, direct-caller, and legitimate-path tests. | Partial: scene/export, sequencer, viewport, HDRI, and BVH families pass Windows unit coverage; Blender 5.2.1 open/save/export/sequencer/HDRI/BVH plus junction checks pass; POSIX and remaining file surfaces pending |
 | FS-002 | Existing outputs are not replaced unless overwrite is enabled locally; export actions with request-level overwrite intent require both decisions. | Sentinel-file and denied-operator tests. | Partial: migrated scene/export family passes unit and live Blender sentinel/approved-overwrite checks; atomic publication remains pending |
 | FS-003 | A scene-derived or content-selected input/output family remains unavailable until every member and destructive effect can be enumerated and authorized before mutation. | Registered/direct denial, sink-removal, scene-nonmutation, and sentinel tests. | Partial: sequencer preview, multi-view capture, background/headless render, FBX animation, physics bake/playback/cache-clear, and external texture-bake paths are quarantined; remaining compound families pending |
@@ -68,6 +68,9 @@ means the invariant is required but not yet proven by the current implementation
   are rejected before rigid-body, cloth, or fluid setup mutates the scene.
 - Texture bake actions declare filesystem-write authority and reject caller-selected `output_path`
   values before scene access at registered, direct-helper, and low-level operator boundaries.
+- Hyper3D, Sketchfab, and Poly Haven now match Hunyuan quarantine: `STATUS` is read-only and truthful;
+  every external action declares its real dedicated capabilities and fails before retired network,
+  local-file, download, temporary-artifact, credential, or Blender-import sinks.
 - `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
 - `pyproject.toml` and `LICENSE`: package metadata disagrees about the license.
 

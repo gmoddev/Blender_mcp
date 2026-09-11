@@ -75,6 +75,10 @@ of accepting `output_path` declares `FILESYSTEM_WRITE`, and caller-selected exte
 fail with `BAKE_OUTPUT_PATH_DISABLED` before scene access. The registered handler, each direct bake
 helper, and the low-level operator wrapper enforce the same rule.
 
+Known provider-managed temporary artifacts are contained by quarantining every external Hunyuan,
+Hyper3D, Sketchfab, and Poly Haven action. Retired download, temporary-directory, and import helpers
+are removed; no provider may treat the process temp directory as implicit filesystem authority.
+
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
 The deprecated `force_export` input is denied and cannot skip resource or path policy.
@@ -89,7 +93,7 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Other imported assets, temporary provider artifacts, subprocess paths, and
+Other imported assets, subprocess paths, and
 other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and

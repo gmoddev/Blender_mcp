@@ -104,6 +104,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   enumerated, authorized, bounded, or reconciled before Blender writes or deletes them.
 - Texture bakes may mutate Blender-internal image datablocks, but caller-selected external output
   paths are rejected before scene access at the registered handler and direct helper boundaries.
+- Every provider module exposes only truthful read-only status until shared network, credential,
+  download, content-validation, temporary-artifact, and provider-job services exist. External
+  actions carry their real capability metadata and are denied at dispatcher and direct boundaries.
 
 ## Reference-Repositories Assessment
 

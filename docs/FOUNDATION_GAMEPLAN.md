@@ -212,6 +212,22 @@ extension and format checks, and proof of the actual output family on supported 
 This remains partial 0E. Provider-managed temporary artifacts are the next filesystem family to
 contain before the shared 0F network/download/archive work.
 
+## Eleventh Implementation Slice: Foundation 0E/0F provider containment
+
+Hyper3D, Sketchfab, and Poly Haven now match the existing Hunyuan quarantine. Every external action
+declares its real network, credential, filesystem, read, and mutation capabilities and fails closed
+at both dispatcher and direct-handler boundaries. Only `STATUS` remains available as `READ`; it
+reports saved enablement separately from `operational: false` and does not read Scene-stored keys.
+
+The retired request, local-file upload, unbounded download, unmanaged temporary-directory, and
+native import helpers are removed and purged during module reload. Blender-live validation confirms
+representative actions preserve the scene and a filesystem sentinel. Re-enablement requires the
+shared 0F/0G controls, evidence-backed provider contracts, bounded off-main-thread jobs, and
+deterministic artifact cleanup tied to the initiating request.
+
+This closes containment of the known provider temporary-artifact paths; it does not implement or
+approve external provider functionality.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

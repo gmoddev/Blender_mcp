@@ -106,8 +106,9 @@ Single-file motion-capture input is limited to authorized `.bvh`; FBX animation 
 until its linked inputs can be preauthorized. Physics bake, simulation-play, and cache-clear routes
 are disabled and custom physics cache paths are rejected until their scene-derived file families
 can be enumerated, authorized, bounded, and reconciled. Texture bakes remain available internally,
-but caller-selected external output paths are rejected before scene access. Other known gaps remain in external
-integration isolation, provider credential storage, download/archive limits,
+but caller-selected external output paths are rejected before scene access. Hunyuan, Hyper3D,
+Sketchfab, and Poly Haven external actions are quarantined; only truthful read-only status remains.
+Other known gaps remain in provider credential storage, shared download/archive implementation,
 selector complexity, checkpoint recovery, and the remaining logging surface.
 These are scan targets, not accepted risks.
 
