@@ -240,6 +240,11 @@ Unit and Blender-live canaries prove worker-thread authorization uses no Blender
 This closes the known pre-queue THREAD-001 violation, while the repository-wide thread audit remains
 open for independently callable execution utilities and other background paths.
 
+The same cross-layer review reopened two previously overbroad claims: request lifecycle identity is
+not isolated by authenticated bridge instance or JSON value type, and exporter authority does not
+yet cover every scene-derived input and output. Those remain explicit 0A/0D/0E blockers rather than
+being hidden by the narrower authorization fix.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

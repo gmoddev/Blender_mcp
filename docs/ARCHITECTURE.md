@@ -85,13 +85,15 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   errors rather than treating them as clean EOF.
 - A bridge timeout is visibly indeterminate and never automatically replayed. Foundation 0D adds a
   bounded, in-process request ledger and a reconciliation handler that bypasses the Blender timer.
-  It does not survive Blender restart and does not cover direct provider timer callbacks.
+  It does not yet namespace identities by authenticated bridge instance or preserve numeric versus
+  string JSON-RPC ID types. It also does not survive Blender restart or cover direct callbacks.
 - The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
   shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
 - Provider credentials remain Scene properties. Scene/export file sinks now use a central
-  user-scoped path authority. Multi-file glTF and USD texture sidecars are disabled, and external
-  asset packing is quarantined pending read grants, but remaining file/network handlers, other
-  sidecars, and string-path TOCTOU prevent valuable-asset readiness.
+  user-scoped path authority. The destination boundary does not yet enumerate every scene-derived
+  exporter input: GLB materials can reference external images, OBJ material export can derive an
+  `.mtl` sibling, and the Blender 5.2 USD texture-mode lock needs correction and live proof.
+  Remaining file/network handlers, sidecars, and string-path TOCTOU prevent valuable-asset readiness.
 - Sequencer media inputs are authorized before editor creation. Sequencer preview rendering is
   disabled until its frame-derived output family can be authorized as a unit.
 - Single viewport captures publish below the write root and return image data inline without JSON
