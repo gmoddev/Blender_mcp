@@ -18,6 +18,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 from stdio_bridge import MCPBridge
+from blender_mcp.core.session import NormalizeJsonRpcRequestId
 
 
 @pytest.fixture
@@ -78,8 +79,32 @@ def test_validation_success_path(mock_bridge):
     assert args[0] == {
         "tool": "dummy_tool",
         "params": {"action": "START", "speed": 50},
-        "request_id": "1",
+        "request_id": NormalizeJsonRpcRequestId(1),
     }
+
+
+def test_json_rpc_numeric_and_string_ids_forward_as_distinct_wire_ids(mock_bridge):
+    setup_dummy_tools(mock_bridge)
+    mock_bridge.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "dummy_tool", "arguments": {"action": "START", "speed": 1}},
+        }
+    )
+    NumericId = mock_bridge.send_to_blender.call_args.args[0]["request_id"]
+    mock_bridge.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "tools/call",
+            "params": {"name": "dummy_tool", "arguments": {"action": "START", "speed": 1}},
+        }
+    )
+    StringId = mock_bridge.send_to_blender.call_args.args[0]["request_id"]
+
+    assert NumericId != StringId
 
 
 def test_validation_invalid_enum(mock_bridge):

@@ -419,6 +419,7 @@ class BlenderMCPServer:
         from .core.session import (
             BuildEnvelope,
             BuildErrorEnvelope,
+            BuildScopedRequestId,
             MessageType,
             PREAUTH_MAX_FRAME_BYTES,
             ServerSession,
@@ -456,7 +457,8 @@ class BlenderMCPServer:
                     break
                 Command = Session.ValidateRequest(Envelope)
                 RequestId = Envelope["request_id"]
-                Command["request_id"] = RequestId
+                ScopedRequestId = BuildScopedRequestId(Session.ClientInstanceId, RequestId)
+                Command["request_id"] = ScopedRequestId
                 Params = Command.get("params", {})
                 if not isinstance(Params, dict):
                     raise SessionError(
@@ -465,6 +467,26 @@ class BlenderMCPServer:
                         RequestId,
                         Session.SessionId,
                     )
+                ExposedIds = {ScopedRequestId: RequestId}
+                if (
+                    Command.get("tool") == "manage_command_lifecycle"
+                    and Params.get("action") in {"GET_STATUS", "CANCEL"}
+                ):
+                    TargetRequestId = Params.get("target_request_id")
+                    if not isinstance(TargetRequestId, str):
+                        raise SessionError(
+                            "INVALID_REQUEST_ID",
+                            "A bounded target_request_id is required",
+                            RequestId,
+                            Session.SessionId,
+                        )
+                    ScopedTargetId = BuildScopedRequestId(
+                        Session.ClientInstanceId, TargetRequestId
+                    )
+                    Params = dict(Params)
+                    Params["target_request_id"] = ScopedTargetId
+                    Command["params"] = Params
+                    ExposedIds[ScopedTargetId] = TargetRequestId
                 RequestedTool = Command.get("tool")
                 ToolName = (
                     RequestedTool
@@ -484,6 +506,7 @@ class BlenderMCPServer:
                     f"tool={ToolName} action={ActionName}"
                 )
                 Response = self.execute_command(Command)
+                Response = self._ExposeRequestIds(Response, ExposedIds)
                 protocol.send_message(
                     client,
                     BuildEnvelope(MessageType.RESPONSE, RequestId, Session.SessionId, Response),
@@ -509,6 +532,21 @@ class BlenderMCPServer:
                 client.close()
             except OSError:
                 pass
+
+    @classmethod
+    def _ExposeRequestIds(cls, Value, ExposedIds):
+        """Replace internal ledger identities only in request-ID metadata fields."""
+        if isinstance(Value, dict):
+            Result = {}
+            for Key, Item in Value.items():
+                if Key in {"request_id", "target_request_id"} and isinstance(Item, str):
+                    Result[Key] = ExposedIds.get(Item, Item)
+                else:
+                    Result[Key] = cls._ExposeRequestIds(Item, ExposedIds)
+            return Result
+        if isinstance(Value, list):
+            return [cls._ExposeRequestIds(Item, ExposedIds) for Item in Value]
+        return Value
 
     def execute_command(self, command):
         """Execute a command with detailed error handling"""

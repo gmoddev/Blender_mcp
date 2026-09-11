@@ -50,7 +50,7 @@ stdio_bridge.py              ← MCP bridge  [standard Python, runs outside Blen
        │                       · Validates JSON schemas before forwarding
        │                       · Caches tool list from Blender on first connect
        │  authenticated TCP localhost:9879
-       │  protocol-v1 envelope + bounded length-prefix JSON
+       │  protocol-v2 envelope + bounded length-prefix JSON
        ▼
 Blender Addon                ← blender_mcp/__init__.py  [runs inside Blender]
   ├── dispatcher.py            Command router + handler registry (HANDLER_REGISTRY)

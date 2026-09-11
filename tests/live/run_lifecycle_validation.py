@@ -25,6 +25,12 @@ def NewBridge(Token: str = AuthToken) -> MCPBridge:
     return MCPBridge(host=Host, port=Port, auth_token=Token)
 
 
+def NewNamespacePeer(Bridge: MCPBridge) -> MCPBridge:
+    Peer = NewBridge()
+    Peer.ClientInstanceId = Bridge.ClientInstanceId
+    return Peer
+
+
 def RequestId(Label: str) -> str:
     return f"live-{Label}-{uuid.uuid4().hex[:12]}"
 
@@ -155,6 +161,7 @@ def Validate() -> None:
     First = NewBridge()
     Second = NewBridge()
     Lost = NewBridge()
+    OpenPeers: list[MCPBridge] = []
     try:
         if not Observer.connect():
             raise AssertionError("authenticated observer could not connect")
@@ -181,7 +188,10 @@ def Validate() -> None:
             {"action": "BLOCK", "duration_seconds": 0.45, "timeout_seconds": 2.0},
             BlockRequest,
         )
-        WaitForState(Observer, BlockRequest, lambda State: State == "running", "block request")
+        FirstPeer = NewNamespacePeer(First)
+        OpenPeers.append(FirstPeer)
+        WaitForState(FirstPeer, BlockRequest, lambda State: State == "running", "block request")
+        FirstPeer.CloseConnection()
 
         PendingRequest = RequestId("pending-timeout")
         PendingResponse = Send(
@@ -198,9 +208,12 @@ def Validate() -> None:
         if PendingError.get("command_state") != "timed_out_pending":
             raise AssertionError(f"pending timeout state was ambiguous: {PendingResponse}")
         RequireSuccess(Join(BlockThread, BlockResponses), "main-thread blocker")
-        PendingSnapshot = GetStatus(Observer, PendingRequest)
+        PendingSnapshot = GetStatus(Second, PendingRequest)
         if PendingSnapshot.get("state") != "timed_out_pending" or GetCount(Observer) != 0:
             raise AssertionError(f"pending timeout callable ran: {PendingSnapshot}")
+        if TryGetStatus(Observer, PendingRequest) is not None:
+            raise AssertionError("another bridge queried a request outside its namespace")
+        Second.CloseConnection()
         print("[BlenderMCP:LiveValidation] PASS pending timeout tombstone", flush=True)
 
         RunningRequest = RequestId("running-timeout")
@@ -214,7 +227,7 @@ def Validate() -> None:
         if RunningError.get("command_state") != "running_after_timeout":
             raise AssertionError(f"running timeout lost state: {RunningResponse}")
         WaitForState(
-            Observer,
+            First,
             RunningRequest,
             lambda State: State == "completed_late",
             "late completion",
@@ -228,11 +241,11 @@ def Validate() -> None:
             "timeout_seconds": 0.2,
         }
         RequireSuccess(
-            Send(Second, "_live_lifecycle_probe", RunningParams, RunningRequest),
+            Send(First, "_live_lifecycle_probe", RunningParams, RunningRequest),
             "duplicate replay",
         )
         ConflictResponse = Send(
-            Second,
+            First,
             "_live_lifecycle_probe",
             {"action": "MUTATE", "duration_seconds": 0.1, "timeout_seconds": 0.2},
             RunningRequest,
@@ -242,6 +255,8 @@ def Validate() -> None:
             raise AssertionError("duplicate or conflicting request re-executed")
         print("[BlenderMCP:LiveValidation] PASS duplicate and conflict handling", flush=True)
 
+        First.CloseConnection()
+        Second.CloseConnection()
         LostRequest = RequestId("response-loss")
         LostParams = {
             "action": "MUTATE",
@@ -254,13 +269,21 @@ def Validate() -> None:
             LostParams,
             LostRequest,
         )
-        WaitForState(Observer, LostRequest, lambda State: State == "running", "lost response")
+        LostPeer = NewNamespacePeer(Lost)
+        OpenPeers.append(LostPeer)
+        WaitForState(
+            LostPeer,
+            LostRequest,
+            lambda State: State == "running",
+            "lost response",
+        )
         Lost.CloseConnection()
         LostResponse = Join(LostThread, LostResponses)
         if LostResponse.get("code") != "REQUEST_INDETERMINATE":
             raise AssertionError(f"lost response was not indeterminate: {LostResponse}")
+        LostPeer.CloseConnection()
         WaitForState(
-            Observer,
+            Lost,
             LostRequest,
             lambda State: State in {"completed", "completed_late"},
             "response-loss reconciliation",
@@ -268,7 +291,7 @@ def Validate() -> None:
         if GetCount(Observer) != 2:
             raise AssertionError("response-loss mutation did not complete exactly once")
         RequireSuccess(
-            Send(Second, "_live_lifecycle_probe", LostParams, LostRequest),
+            Send(Lost, "_live_lifecycle_probe", LostParams, LostRequest),
             "reconciled duplicate replay",
         )
         if GetCount(Observer) != 2:
@@ -282,12 +305,15 @@ def Validate() -> None:
             {"action": "BLOCK", "duration_seconds": 0.45, "timeout_seconds": 2.0},
             CancelBlockRequest,
         )
+        FirstPeer = NewNamespacePeer(First)
+        OpenPeers.append(FirstPeer)
         WaitForState(
-            Observer,
+            FirstPeer,
             CancelBlockRequest,
             lambda State: State == "running",
             "cancel blocker",
         )
+        FirstPeer.CloseConnection()
         CancelRequest = RequestId("cancel-pending")
         CancelThread, CancelResponses = RunAsync(
             Second,
@@ -295,16 +321,26 @@ def Validate() -> None:
             {"action": "MUTATE", "duration_seconds": 0.0, "timeout_seconds": 2.0},
             CancelRequest,
         )
-        WaitForState(Observer, CancelRequest, lambda State: State == "pending", "cancel target")
+        SecondPeer = NewNamespacePeer(Second)
+        OpenPeers.append(SecondPeer)
+        WaitForState(SecondPeer, CancelRequest, lambda State: State == "pending", "cancel target")
+        CrossClientCancel = Send(
+            Observer,
+            "manage_command_lifecycle",
+            {"action": "CANCEL", "target_request_id": CancelRequest},
+            RequestId("cross-client-cancel"),
+        )
+        RequireError(CrossClientCancel, "REQUEST_NOT_FOUND", "cross-client cancel")
         CancelResult = RequireSuccess(
             Send(
-                Observer,
+                SecondPeer,
                 "manage_command_lifecycle",
                 {"action": "CANCEL", "target_request_id": CancelRequest},
                 RequestId("cancel"),
             ),
             "cancel pending request",
         )
+        SecondPeer.CloseConnection()
         CancelSnapshot = CancelResult.get("request", {})
         if CancelSnapshot.get("state") != "cancelled" or not CancelSnapshot.get("cancelled"):
             raise AssertionError(f"cancel did not tombstone pending request: {CancelResult}")
@@ -314,7 +350,7 @@ def Validate() -> None:
             raise AssertionError("cancelled callable executed")
         print("[BlenderMCP:LiveValidation] PASS pending cancellation", flush=True)
     finally:
-        CloseAll(Observer, First, Second, Lost)
+        CloseAll(Observer, First, Second, Lost, *OpenPeers)
 
 
 if __name__ == "__main__":

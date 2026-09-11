@@ -14,7 +14,13 @@ $ResolvedBlenderPath = (Resolve-Path -LiteralPath $BlenderPath).Path
 $PreviousAuthToken = [Environment]::GetEnvironmentVariable('BLENDER_MCP_AUTH_TOKEN', 'Process')
 $PreviousPort = [Environment]::GetEnvironmentVariable('BLENDER_MCP_LIVE_TEST_PORT', 'Process')
 $TokenBytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($TokenBytes)
+$RandomGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $RandomGenerator.GetBytes($TokenBytes)
+}
+finally {
+    $RandomGenerator.Dispose()
+}
 $env:BLENDER_MCP_AUTH_TOKEN = [Convert]::ToBase64String($TokenBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 
 $PortProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)

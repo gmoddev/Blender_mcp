@@ -2,7 +2,8 @@
 
 ## Effective Version
 
-Wire protocol version `1` is a deliberate break from the unauthenticated legacy payload. There is
+Wire protocol version `2` adds an authenticated bridge-instance identity to the version 1 security
+envelope. Both are deliberate breaks from earlier payloads, and only version 2 is accepted. There is
 no silent legacy fallback. A peer that does not speak the envelope receives a bounded protocol
 error or a closed connection.
 
@@ -15,7 +16,7 @@ body, and idle deadlines.
 
 ```json
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "message_type": "REQUEST",
   "request_id": "json-rpc-42",
   "session_id": "d5f91e8a-...",
@@ -34,26 +35,37 @@ Blender sends a short-lived challenge immediately after accept. It contains only
 a unique Blender instance ID, authentication epoch, connection session ID, request ID, and random
 server nonce. It contains no tools or parameters.
 
-The bridge returns a client nonce and `HMAC-SHA256` proof over length-delimited fields:
+The bridge returns a stable process-local bridge instance ID, a client nonce, and an `HMAC-SHA256`
+proof over length-delimited fields:
 
 ```text
-domain = BLENDER_MCP_AUTH_V1 / CLIENT
-version, instance_id, auth_epoch, session_id, request_id, server_nonce, client_nonce
+domain = BLENDER_MCP_AUTH_V2 / CLIENT
+version, instance_id, auth_epoch, session_id, request_id, server_nonce,
+bridge_instance_id, client_nonce
 ```
 
 Blender compares the proof in constant time and returns a proof over the same transcript under the
 separate `SERVER` domain. This authenticates both peers without transmitting the pre-shared token.
-Captured proofs do not authenticate against another instance, epoch, session, nonce, or request.
+Captured proofs do not authenticate against another Blender instance, bridge instance, epoch,
+session, nonce, or request.
 
-The handshake authenticates the TCP connection. Version 1 does not MAC each post-handshake frame;
+The handshake authenticates the TCP connection and binds its bridge namespace. Version 2 does not
+MAC each post-handshake frame;
 session and request IDs provide correlation, not independent message integrity. Loopback binding
 remains mandatory defense-in-depth.
+
+JSON-RPC string and numeric IDs are normalized with distinct type tags before crossing the TCP
+boundary. Blender derives a private bounded ledger key from the authenticated bridge instance and
+that wire ID. The private key is translated back to the wire ID in response metadata. Lifecycle
+status and cancellation targets are scoped at the server boundary, so another bridge using the
+same JSON-RPC ID addresses a different ledger entry. A bridge keeps its instance ID across TCP
+reconnects for in-process reconciliation; a new bridge process receives a new namespace.
 
 ## Credential Configuration and Rotation
 
 The Blender add-on reads its credential from user-scoped Addon Preferences, falling back to
 `BLENDER_MCP_AUTH_TOKEN` only when the preference is empty; it never reads Scene data. The bridge
-reads the environment variable unless explicitly supplied by an embedding application. Protocol v1
+reads the environment variable unless explicitly supplied by an embedding application. Protocol v2
 accepts only the canonical 43-character base64url encoding produced from 32 random bytes by the
 add-on's generate/rotate action. Preference precedence ensures a stale environment value cannot
 become authoritative again after UI rotation and restart. Rotation increments the auth epoch,
@@ -67,4 +79,5 @@ This initial storage is outside `.blend` files but is not yet an OS credential m
 The bridge serializes each complete request/reply transaction. It may retry connection and
 authentication before sending a command. Once a command-frame write begins, timeout, EOF, correlation
 failure, or transport failure closes the socket and returns `REQUEST_INDETERMINATE`; the bridge does
-not replay the command. Foundation 0D will add durable status reconciliation and result deduplication.
+not replay the command. The bounded in-process Foundation 0D ledger supports reconciliation within
+the same authenticated bridge namespace; durable restart recovery remains open.

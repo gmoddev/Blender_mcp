@@ -27,6 +27,7 @@ TOKEN_B = base64.urlsafe_b64encode(bytes(range(32, 64))).decode("ascii").rstrip(
 
 
 def BuildAuth(Server: ServerSession, AuthToken: str) -> dict:
+    ClientInstanceId = "bridge-instance-a"
     ClientNonce = "client-nonce-with-at-least-32-bytes"
     Fields = [
         PROTOCOL_VERSION,
@@ -35,13 +36,18 @@ def BuildAuth(Server: ServerSession, AuthToken: str) -> dict:
         Server.SessionId,
         Server.RequestId,
         Server.ServerNonce,
+        ClientInstanceId,
         ClientNonce,
     ]
     return BuildEnvelope(
         MessageType.AUTH,
         Server.RequestId,
         Server.SessionId,
-        {"client_nonce": ClientNonce, "proof": CreateProof(AuthToken, "CLIENT", Fields)},
+        {
+            "client_instance_id": ClientInstanceId,
+            "client_nonce": ClientNonce,
+            "proof": CreateProof(AuthToken, "CLIENT", Fields),
+        },
     )
 
 
@@ -61,6 +67,7 @@ class TestServerSession:
             {"tool": "get_server_status", "params": {"action": "get_server_status"}},
         )
         assert Server.ValidateRequest(Request)["tool"] == "get_server_status"
+        assert Server.ClientInstanceId == "bridge-instance-a"
 
     def test_wrong_token_is_rejected(self) -> None:
         Server = ServerSession(TOKEN_A, "instance-a", 1)
@@ -113,6 +120,14 @@ class TestServerSession:
         Server = ServerSession(TOKEN_A, "instance-a", 1)
         Auth = BuildAuth(Server, TOKEN_A)
         Auth["payload"]["tool"] = "execute_blender_code"
+        with pytest.raises(SessionError) as Error:
+            Server.Authenticate(Auth)
+        assert Error.value.Code == "AUTH_FAILED"
+
+    def test_client_instance_identity_is_bound_into_authentication_proof(self) -> None:
+        Server = ServerSession(TOKEN_A, "instance-a", 1)
+        Auth = BuildAuth(Server, TOKEN_A)
+        Auth["payload"]["client_instance_id"] = "bridge-instance-b"
         with pytest.raises(SessionError) as Error:
             Server.Authenticate(Auth)
         assert Error.value.Code == "AUTH_FAILED"

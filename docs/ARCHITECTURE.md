@@ -6,7 +6,7 @@
 MCP client
   -> newline-delimited JSON-RPC on stdio
   -> stdio_bridge.MCPBridge (schema cache, transaction lock, request identity)
-  -> loopback TCP, bounded length prefix, protocol-v1 envelope
+  -> loopback TCP, bounded length prefix, protocol-v2 envelope
   -> server-first mutual HMAC authentication
   -> BlenderMCPServer client thread (session/correlation validation)
   -> dispatcher (registry -> action -> capability -> schema)
@@ -85,8 +85,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
   errors rather than treating them as clean EOF.
 - A bridge timeout is visibly indeterminate and never automatically replayed. Foundation 0D adds a
   bounded, in-process request ledger and a reconciliation handler that bypasses the Blender timer.
-  It does not yet namespace identities by authenticated bridge instance or preserve numeric versus
-  string JSON-RPC ID types. It also does not survive Blender restart or cover direct callbacks.
+  Protocol v2 namespaces retained identities by proof-bound bridge instance and preserves numeric
+  versus string JSON-RPC ID types. The ledger still does not survive Blender restart or cover direct
+  callbacks.
 - The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
   shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
 - Provider credentials remain Scene properties. Scene/export file sinks now use a central

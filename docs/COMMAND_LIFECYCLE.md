@@ -3,15 +3,22 @@
 ## Implemented Foundation 0D Behavior
 
 A stable, log-safe request ID now travels from the JSON-RPC call through the bridge envelope,
-Blender dispatcher, response envelope, logs, and JSON-RPC response. Unsafe string identifiers are
-mapped deterministically to a SHA-256-derived wire ID while the original JSON-RPC ID remains in the
-outer response.
+Blender dispatcher, response envelope, logs, and JSON-RPC response. JSON-RPC value types are part
+of the normalized identity, so numeric `1` and string `"1"` cannot collide. The original JSON-RPC
+ID remains in the outer response.
+
+Protocol v2 authenticates a bridge instance ID during the mutual-HMAC handshake. Blender derives
+the private ledger key from that authenticated namespace plus the normalized wire ID. The bridge
+keeps its instance ID across TCP reconnects, while independent bridge processes cannot query,
+cancel, conflict with, or replay each other's same-ID ledger entries. Response metadata exposes the
+wire ID, never the private ledger key.
 
 The bridge never automatically replays a command after its frame may have been sent. It closes a
 timed-out or mismatched socket so a late response cannot be consumed by a later request. Such an
 outcome is `REQUEST_INDETERMINATE`.
 
-The dispatcher binds that wire ID to a SHA-256 digest of the canonical tool and parameter object.
+The dispatcher binds the bridge-scoped ledger ID to a SHA-256 digest of the canonical tool and
+parameter object.
 The in-process ledger retains at most 4096 requests for 15 minutes after their terminal state. An
 identical duplicate never enqueues a second callable: it returns the retained result, terminal
 state, or current in-progress state. Reusing an ID with different content fails closed as
@@ -77,7 +84,8 @@ ID and canonical request content.
 
 ## Foundation 0D Acceptance Evidence
 
-- Bounded request ledger keyed by request ID plus canonical request digest: implemented, unit tested.
+- Bounded request ledger keyed by authenticated bridge namespace, typed wire ID, and canonical
+  request digest: implemented and unit tested.
 - Duplicate identical requests return stored state/result; reuse with different content denies:
   implemented, unit tested.
 - Pending timeout and cancellation tombstone before the queue consumer can execute: implemented,

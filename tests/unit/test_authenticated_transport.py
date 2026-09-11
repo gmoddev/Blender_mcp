@@ -19,7 +19,12 @@ from blender_mcp import BlenderMCPServer  # noqa: E402
 from blender_mcp.core.filesystem_boundary import ResetFilesystemPolicy  # noqa: E402
 from blender_mcp.core.security import GetSecurityPolicy, ResetSecurityPolicy  # noqa: E402
 from blender_mcp.core.protocol import recv_message, send_message  # noqa: E402
-from blender_mcp.core.session import BuildEnvelope, MessageType  # noqa: E402
+from blender_mcp.core.session import (  # noqa: E402
+    BuildEnvelope,
+    BuildScopedRequestId,
+    MessageType,
+    NormalizeJsonRpcRequestId,
+)
 from stdio_bridge import MCPBridge  # noqa: E402
 
 TOKEN = base64.urlsafe_b64encode(bytes(range(64, 96))).decode("ascii").rstrip("=")
@@ -89,9 +94,79 @@ def test_authenticated_bridge_preserves_request_id() -> None:
             retries=0,
         )
         assert Response["status"] == "success"
-        assert Response["result"]["observed_request_id"] == "json-rpc-73"
+        assert Response["result"]["observed_request_id"] == BuildScopedRequestId(
+            Bridge.ClientInstanceId, "json-rpc-73"
+        )
     finally:
         Bridge.CloseConnection()
+        Server.stop()
+
+
+def test_json_rpc_request_ids_preserve_value_type() -> None:
+    assert NormalizeJsonRpcRequestId(1) != NormalizeJsonRpcRequestId("1")
+
+
+def test_bridge_namespace_is_stable_across_reconnect_and_isolated_between_bridges() -> None:
+    Server = StartServer()
+    Observed = []
+
+    def Execute(Command: dict) -> dict:
+        Observed.append(Command["request_id"])
+        return {"status": "success", "result": {"ok": True}}
+
+    Server.execute_command = Execute  # type: ignore[method-assign]
+    BridgeA = MCPBridge(host="127.0.0.1", port=Server.port, auth_token=TOKEN)
+    BridgeB = MCPBridge(host="127.0.0.1", port=Server.port, auth_token=TOKEN)
+    try:
+        Command = {
+            "tool": "get_server_status",
+            "params": {"action": "get_server_status"},
+            "request_id": "same-wire-id",
+        }
+        assert BridgeA.send_to_blender(Command, retries=0)["status"] == "success"
+        BridgeA.CloseConnection()
+        assert BridgeA.send_to_blender(Command, retries=0)["status"] == "success"
+        assert BridgeB.send_to_blender(Command, retries=0)["status"] == "success"
+        assert Observed[0] == Observed[1]
+        assert Observed[0] != Observed[2]
+    finally:
+        BridgeA.CloseConnection()
+        BridgeB.CloseConnection()
+        Server.stop()
+
+
+def test_lifecycle_target_is_scoped_to_authenticated_bridge_and_not_exposed() -> None:
+    Server = StartServer()
+    ObservedTargets = []
+
+    def Execute(Command: dict) -> dict:
+        Target = Command["params"]["target_request_id"]
+        ObservedTargets.append(Target)
+        return {
+            "status": "success",
+            "result": {"request_id": Target, "target_request_id": Target},
+            "_meta": {"request_id": Command["request_id"]},
+        }
+
+    Server.execute_command = Execute  # type: ignore[method-assign]
+    BridgeA = MCPBridge(host="127.0.0.1", port=Server.port, auth_token=TOKEN)
+    BridgeB = MCPBridge(host="127.0.0.1", port=Server.port, auth_token=TOKEN)
+    Command = {
+        "tool": "manage_command_lifecycle",
+        "params": {"action": "GET_STATUS", "target_request_id": "original-request"},
+        "request_id": "status-request",
+    }
+    try:
+        ResponseA = BridgeA.send_to_blender(Command, retries=0)
+        ResponseB = BridgeB.send_to_blender(Command, retries=0)
+        assert ObservedTargets[0] != ObservedTargets[1]
+        assert ResponseA["result"]["request_id"] == "original-request"
+        assert ResponseA["result"]["target_request_id"] == "original-request"
+        assert ResponseA["_meta"]["request_id"] == "status-request"
+        assert ResponseB["result"]["request_id"] == "original-request"
+    finally:
+        BridgeA.CloseConnection()
+        BridgeB.CloseConnection()
         Server.stop()
 
 

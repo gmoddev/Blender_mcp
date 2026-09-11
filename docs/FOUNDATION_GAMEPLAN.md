@@ -240,10 +240,24 @@ Unit and Blender-live canaries prove worker-thread authorization uses no Blender
 This closes the known pre-queue THREAD-001 violation, while the repository-wide thread audit remains
 open for independently callable execution utilities and other background paths.
 
-The same cross-layer review reopened two previously overbroad claims: request lifecycle identity is
+The same cross-layer review reopened two previously overbroad claims: request lifecycle identity was
 not isolated by authenticated bridge instance or JSON value type, and exporter authority does not
-yet cover every scene-derived input and output. Those remain explicit 0A/0D/0E blockers rather than
-being hidden by the narrower authorization fix.
+yet cover every scene-derived input and output. The thirteenth slice closes the identity gap; the
+exporter authority gaps remain explicit 0E blockers.
+
+## Thirteenth Implementation Slice: Foundation 0A/0D request identity isolation
+
+Protocol v2 adds a stable bridge-instance ID to the mutual-HMAC transcript. JSON-RPC identifiers
+are normalized with their JSON value type, and Blender derives its private ledger identity from the
+proof-bound bridge namespace plus the wire ID. Numeric `1` and string `"1"` no longer collide;
+independent bridges may safely reuse the same outer ID; and status, cancellation, duplicate replay,
+and conflict checks cannot cross bridge namespaces. The same bridge keeps its identity over TCP
+reconnects, preserving response-loss reconciliation without making a connection session durable.
+
+Unit coverage proves proof tampering fails, typed IDs remain distinct, two bridges cannot collide,
+and internal ledger keys are not exposed in response metadata. The Blender-live lifecycle harness
+now uses same-bridge reconciliation and includes negative cross-bridge status/cancel checks. Process
+restart durability and complete disconnect shutdown semantics remain open under REC-001.
 
 ### Milestone 0: Baseline and scan readiness
 

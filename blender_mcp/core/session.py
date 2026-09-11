@@ -19,7 +19,7 @@ from typing import Any, Dict, Iterable, cast
 
 from .protocol import ProtocolError, recv_message, send_message
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 AUTH_TOKEN_ENV = "BLENDER_MCP_AUTH_TOKEN"
 AUTH_TOKEN_BYTES = 32
 MIN_AUTH_TOKEN_LENGTH = 43
@@ -144,12 +144,48 @@ def NormalizeRequestId(Value: Any) -> str:
     return f"jsonrpc-{Digest}"
 
 
+def NormalizeJsonRpcRequestId(Value: Any) -> str:
+    """Encode a JSON-RPC identifier without collapsing distinct JSON value types."""
+    if isinstance(Value, str):
+        TypeTag = "string"
+    elif isinstance(Value, bool):
+        TypeTag = "boolean"
+    elif Value is None:
+        TypeTag = "null"
+    elif isinstance(Value, (int, float)):
+        TypeTag = "number"
+    else:
+        TypeTag = "invalid"
+    try:
+        Canonical = json.dumps(Value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        Canonical = repr(type(Value))
+    Digest = hashlib.sha256(Canonical.encode("utf-8", errors="replace")).hexdigest()
+    return f"jsonrpc-{TypeTag}-{Digest}"
+
+
+def BuildScopedRequestId(ClientInstanceId: str, RequestId: str) -> str:
+    """Build a bounded ledger key from authenticated client and wire identities."""
+    if not isinstance(ClientInstanceId, str) or not REQUEST_ID_PATTERN.fullmatch(ClientInstanceId):
+        raise SessionError("INVALID_CLIENT_INSTANCE", "Authenticated client identity is invalid")
+    if not isinstance(RequestId, str) or not REQUEST_ID_PATTERN.fullmatch(RequestId):
+        raise SessionError("INVALID_REQUEST_ID", "A bounded request_id is required")
+    Canonical = b"".join(
+        struct.pack(">I", len(Part)) + Part
+        for Part in (ClientInstanceId.encode("utf-8"), RequestId.encode("utf-8"))
+    )
+    return f"scoped-{hashlib.sha256(Canonical).hexdigest()}"
+
+
 def ValidateEnvelope(Envelope: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the common envelope and return it unchanged."""
     if not isinstance(Envelope, dict):
         raise SessionError("INVALID_ENVELOPE", "Envelope must be an object")
     if set(Envelope) != ENVELOPE_FIELDS:
-        raise SessionError("INVALID_ENVELOPE", "Envelope fields do not match protocol version 1")
+        raise SessionError(
+            "INVALID_ENVELOPE",
+            f"Envelope fields do not match protocol version {PROTOCOL_VERSION}",
+        )
 
     RequestId = Envelope.get("request_id")
     SessionId = Envelope.get("session_id")
@@ -181,7 +217,7 @@ def ValidateEnvelope(Envelope: Dict[str, Any]) -> Dict[str, Any]:
 def CreateProof(AuthToken: str, Direction: str, Fields: Iterable[str | int]) -> str:
     """Create a domain-separated HMAC over length-delimited canonical fields."""
     Token = ValidateAuthToken(AuthToken).encode("utf-8")
-    Parts = [b"BLENDER_MCP_AUTH_V1", Direction.encode("ascii")]
+    Parts = [b"BLENDER_MCP_AUTH_V2", Direction.encode("ascii")]
     Parts.extend(str(Field).encode("utf-8") for Field in Fields)
     Canonical = b"".join(struct.pack(">I", len(Part)) + Part for Part in Parts)
     return hmac.new(Token, Canonical, hashlib.sha256).hexdigest()
@@ -205,6 +241,7 @@ class ServerSession:
         self.ServerNonce = secrets.token_urlsafe(32)
         self.ExpiresAt = time.time() + LifetimeSeconds
         self.ClientNonce = ""
+        self.ClientInstanceId = ""
         self.State = SessionState.CHALLENGE_SENT
 
     def BuildChallenge(self) -> Dict[str, Any]:
@@ -240,14 +277,17 @@ class ServerSession:
             )
 
         Payload = Validated["payload"]
-        if set(Payload) != {"client_nonce", "proof"}:
+        if set(Payload) != {"client_instance_id", "client_nonce", "proof"}:
             raise SessionError(
                 "AUTH_FAILED", "Authentication proof is invalid", self.RequestId, self.SessionId
             )
+        ClientInstanceId = Payload.get("client_instance_id")
         ClientNonce = Payload.get("client_nonce")
         SuppliedProof = Payload.get("proof")
         if (
-            not isinstance(ClientNonce, str)
+            not isinstance(ClientInstanceId, str)
+            or not REQUEST_ID_PATTERN.fullmatch(ClientInstanceId)
+            or not isinstance(ClientNonce, str)
             or not 32 <= len(ClientNonce) <= MAX_IDENTIFIER_LENGTH
             or not isinstance(SuppliedProof, str)
             or len(SuppliedProof) != 64
@@ -256,7 +296,7 @@ class ServerSession:
                 "AUTH_FAILED", "Authentication proof is invalid", self.RequestId, self.SessionId
             )
 
-        Fields = self._ProofFields(ClientNonce)
+        Fields = self._ProofFields(ClientInstanceId, ClientNonce)
         ExpectedProof = CreateProof(self.AuthToken, "CLIENT", Fields)
         if not secrets.compare_digest(SuppliedProof, ExpectedProof):
             raise SessionError(
@@ -264,6 +304,7 @@ class ServerSession:
             )
 
         self.ClientNonce = ClientNonce
+        self.ClientInstanceId = ClientInstanceId
         self.State = SessionState.AUTHENTICATED
         ServerProof = CreateProof(self.AuthToken, "SERVER", Fields)
         return BuildEnvelope(
@@ -298,7 +339,7 @@ class ServerSession:
     def Close(self) -> None:
         self.State = SessionState.CLOSED
 
-    def _ProofFields(self, ClientNonce: str) -> list[str | int]:
+    def _ProofFields(self, ClientInstanceId: str, ClientNonce: str) -> list[str | int]:
         return [
             PROTOCOL_VERSION,
             self.InstanceId,
@@ -306,6 +347,7 @@ class ServerSession:
             self.SessionId,
             self.RequestId,
             self.ServerNonce,
+            ClientInstanceId,
             ClientNonce,
         ]
 
@@ -313,8 +355,9 @@ class ServerSession:
 class ClientSession:
     """Bridge-side authenticated connection state."""
 
-    def __init__(self, AuthToken: str) -> None:
+    def __init__(self, AuthToken: str, ClientInstanceId: str | None = None) -> None:
         self.AuthToken = ValidateAuthToken(AuthToken)
+        self.ClientInstanceId = NormalizeRequestId(ClientInstanceId or str(uuid.uuid4()))
         self.InstanceId = ""
         self.AuthEpoch = 0
         self.SessionId = ""
@@ -368,6 +411,7 @@ class ClientSession:
             Challenge["session_id"],
             Challenge["request_id"],
             ServerNonce,
+            self.ClientInstanceId,
             ClientNonce,
         ]
         ClientProof = CreateProof(self.AuthToken, "CLIENT", Fields)
@@ -377,7 +421,11 @@ class ClientSession:
                 MessageType.AUTH,
                 Challenge["request_id"],
                 Challenge["session_id"],
-                {"client_nonce": ClientNonce, "proof": ClientProof},
+                {
+                    "client_instance_id": self.ClientInstanceId,
+                    "client_nonce": ClientNonce,
+                    "proof": ClientProof,
+                },
             ),
         )
 

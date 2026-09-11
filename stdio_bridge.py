@@ -46,6 +46,7 @@ class MCPBridge:
         self.port = port
         self.client_socket = None
         self.AuthToken = auth_token or os.environ.get("BLENDER_MCP_AUTH_TOKEN", "")
+        self.ClientInstanceId = str(uuid.uuid4())
         self.Session = None
         self._TransactionLock = threading.RLock()
         self._LastErrorCode = ""
@@ -68,7 +69,7 @@ class MCPBridge:
             self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client_socket.settimeout(5.0)
             self.client_socket.connect((self.host, self.port))
-            self.Session = ClientSession(self.AuthToken)
+            self.Session = ClientSession(self.AuthToken, self.ClientInstanceId)
             self.Session.PerformHandshake(self.client_socket)
             self._LastErrorCode = ""
             logging.info("[BlenderMCP:Auth] Authenticated local session")
@@ -86,7 +87,7 @@ class MCPBridge:
 
     @staticmethod
     def IsLoopbackHost(Host):
-        """Protocol v1 never sends authentication material to a remote host."""
+        """The local protocol never sends authentication material to a remote host."""
         if Host == "localhost":
             return True
         try:
@@ -266,9 +267,13 @@ class MCPBridge:
         msg_id = request.get("id")
         method = request.get("method")
         params = request.get("params", {})
-        from blender_mcp.core.session import NormalizeRequestId
+        from blender_mcp.core.session import NormalizeJsonRpcRequestId, NormalizeRequestId
 
-        WireRequestId = NormalizeRequestId(msg_id if msg_id is not None else str(uuid.uuid4()))
+        WireRequestId = (
+            NormalizeJsonRpcRequestId(msg_id)
+            if msg_id is not None
+            else NormalizeRequestId(str(uuid.uuid4()))
+        )
 
         response = {"jsonrpc": "2.0", "id": msg_id}
 
