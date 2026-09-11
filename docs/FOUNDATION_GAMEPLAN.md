@@ -198,6 +198,20 @@ running bakes.
 This remains partial 0E. Texture-bake output paths and provider-managed temporary artifacts are the
 next filesystem families to contain before the shared 0F network/download/archive work.
 
+## Tenth Implementation Slice: Foundation 0E texture-bake output containment
+
+Every texture-bake action that can accept `output_path` now declares `FILESYSTEM_WRITE` in addition
+to `MUTATE`. Caller-selected external output paths fail with `BAKE_OUTPUT_PATH_DISABLED` before
+Blender scene access, while bakes targeting Blender-internal image datablocks remain available.
+
+The registered handler, each direct type-specific bake helper, the generic bake helper, and the
+low-level bake operator wrapper all enforce the same boundary. Re-enablement requires canonical
+write-root authorization immediately before the final Blender operator, overwrite policy, stable
+extension and format checks, and proof of the actual output family on supported Blender versions.
+
+This remains partial 0E. Provider-managed temporary artifacts are the next filesystem family to
+contain before the shared 0F network/download/archive work.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

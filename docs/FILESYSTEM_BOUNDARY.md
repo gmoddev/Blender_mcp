@@ -70,6 +70,11 @@ bake, playback, or deletion sinks. Physics setup rejects caller-selected `cache_
 scene access; setup without that parameter may configure simulation state but cannot invoke the
 quarantined cache-producing routes.
 
+Texture baking remains available for Blender-internal image datablocks. Every bake action capable
+of accepting `output_path` declares `FILESYSTEM_WRITE`, and caller-selected external output paths
+fail with `BAKE_OUTPUT_PATH_DISABLED` before scene access. The registered handler, each direct bake
+helper, and the low-level operator wrapper enforce the same rule.
+
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
 The deprecated `force_export` input is denied and cannot skip resource or path policy.
@@ -84,7 +89,7 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Other imported assets, texture-bake outputs, temporary provider artifacts, subprocess paths, and
+Other imported assets, temporary provider artifacts, subprocess paths, and
 other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and
@@ -93,8 +98,8 @@ Windows unit coverage exercises traversal,
 sibling-prefix, ambiguous syntax, overwrite, and final-extension behavior. Blender 5.2.1 live
 validation passes outside-root open/save/export denial, sentinel preservation, approved overwrite,
 approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI/BVH denial,
-approved `.hdr` and BVH loading, and headless/FBX/physics-cache quarantine without filesystem side
-effects.
+approved `.hdr` and BVH loading, and headless/FBX/physics-cache/texture-bake quarantine without
+filesystem side effects.
 Supported POSIX and broader live operator coverage remain required.
 
 Until those gates pass, use disposable `.blend` copies and treat Foundation 0E as partial.

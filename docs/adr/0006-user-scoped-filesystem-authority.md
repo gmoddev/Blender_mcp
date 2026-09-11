@@ -47,6 +47,8 @@ Authorize the final concrete path immediately before the file sink:
 12. reject caller-selected physics cache paths and quarantine physics bake, simulation-play, and
     cache-clear actions until every scene-derived cache member and destructive operation can be
     authorized before mutation.
+13. classify every texture-bake action that accepts `output_path` as a filesystem write and reject
+    external bake paths before scene access until final-sink authorization is implemented.
 
 Grant `FILESYSTEM_READ` and `FILESYSTEM_WRITE` only when the corresponding validated root exists.
 Safe Mode may combine `READ` with `FILESYSTEM_READ`, but it never gains `MUTATE` or filesystem

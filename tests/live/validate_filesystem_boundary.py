@@ -27,6 +27,7 @@ from blender_mcp.core.filesystem_boundary import (  # noqa: E402
     ResetFilesystemPolicy,
 )
 from blender_mcp.handlers.manage_headless_mode import manage_headless_mode  # noqa: E402
+from blender_mcp.handlers.manage_bake import manage_bake  # noqa: E402
 from blender_mcp.handlers.manage_light import manage_light  # noqa: E402
 from blender_mcp.handlers.manage_mocap import manage_mocap  # noqa: E402
 from blender_mcp.handlers.manage_physics import manage_physics  # noqa: E402
@@ -203,6 +204,21 @@ Frame Time: 0.0333333
     if _Digest(CacheSentinel) != CacheDigest:
         raise AssertionError("denied physics cache operation changed the sentinel")
 
+    BakeSentinel = OutsideRoot / "baked-texture.png"
+    BakeSentinel.write_bytes(b"bake-output-sentinel")
+    BakeDigest = _Digest(BakeSentinel)
+    ObjectsBeforeBakeDenial = len(bpy.data.objects)
+    DeniedBakeOutput = manage_bake(
+        action="BAKE_NORMAL",
+        output_path=str(BakeSentinel),
+    )
+    if _ErrorCode(DeniedBakeOutput) != "BAKE_OUTPUT_PATH_DISABLED":
+        raise AssertionError(f"texture bake output quarantine returned {DeniedBakeOutput}")
+    if len(bpy.data.objects) != ObjectsBeforeBakeDenial:
+        raise AssertionError("denied texture bake output changed scene objects")
+    if _Digest(BakeSentinel) != BakeDigest:
+        raise AssertionError("denied texture bake output changed the sentinel")
+
     try:
         ExportValidator.check_path_injection(
             str(OutsideRoot / "force.glb"),
@@ -246,7 +262,7 @@ Frame Time: 0.0333333
         raise AssertionError(f"approved open failed: {ApprovedOpen}")
 
     print(
-        "[BlenderMCP:FilesystemLive] PASS containment, export, imports, caches, and quarantines",
+        "[BlenderMCP:FilesystemLive] PASS containment, export, imports, caches, bakes, and quarantines",
         flush=True,
     )
 finally:

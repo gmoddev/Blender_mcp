@@ -25,6 +25,7 @@ from ..core.thread_safety import execute_on_main_thread, ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3, SafeModeContext
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.versioning import BlenderCompatibility
 from ..dispatcher import register_handler
 from ..core.enums import BakeAction
@@ -32,6 +33,25 @@ from ..core.constants import BakingDefaults
 from typing import Any, Tuple, Optional
 
 logger = get_logger()
+
+BakeOutputActions = {
+    Action.value for Action in BakeAction if Action.value == "BAKE" or Action.value.startswith("BAKE_")
+}
+BakeCapabilities = {Action.value: [Capability.MUTATE.value] for Action in BakeAction}
+for OutputAction in BakeOutputActions:
+    BakeCapabilities[OutputAction] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+
+
+def _BakeOutputPathDisabled(Action: str) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_bake",
+        action=Action,
+        error_code="BAKE_OUTPUT_PATH_DISABLED",
+        message="External bake output paths are disabled pending filesystem authorization",
+    )
 
 
 @register_handler(
@@ -108,6 +128,7 @@ logger = get_logger()
         "required": ["action"],
     },
     actions=[e.value for e in BakeAction],
+    capabilities=BakeCapabilities,
     category="baking",
 )
 @ensure_main_thread
@@ -131,6 +152,9 @@ def manage_bake(action: str | None = None, **params: Any) -> dict[str, Any]:
             error_code="MISSING_PARAMETER",
             message="Missing required parameter: 'action'",
         )
+
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(str(action))
 
     # Coerce integer parameters
     params["resolution"] = _coerce_int(
@@ -192,10 +216,13 @@ def manage_bake(action: str | None = None, **params: Any) -> dict[str, Any]:
                 error_code="INVALID_PARAMETER_VALUE",
                 message=f"Unknown action: {action}",
             )
-    except Exception as e:
-        logger.error(f"manage_bake.{action} failed: {e}", exc_info=True)
+    except Exception:
+        logger.exception("[BlenderMCP:Bake] operation failed")
         return ResponseBuilder.error(
-            handler="manage_bake", action=action, error_code="EXECUTION_ERROR", message=str(e)
+            handler="manage_bake",
+            action=str(action),
+            error_code="EXECUTION_ERROR",
+            message="Bake operation failed",
         )
 
 
@@ -281,6 +308,8 @@ def _prepare_bake_visibility(objects):  # type: ignore[no-untyped-def]
 
 def _execute_bake_with_context(scene, bake_type, **kwargs):  # type: ignore[no-untyped-def]
     """Execute bake with proper context override for Blender 5.0+ on main thread."""
+    if kwargs.get("filepath") or kwargs.get("save_mode") == "EXTERNAL":
+        return False, "External bake output paths are disabled pending filesystem authorization"
 
     # Extract object references for visibility handling from kwargs or context
     # We mainly need to ensure active and selected objects are visible
@@ -551,6 +580,9 @@ def _handle_create_bake_material(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_normal(**params):  # type: ignore[no-untyped-def]
     """Bake normal map with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_NORMAL.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -626,6 +658,9 @@ def _handle_bake_normal(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_ao(**params):  # type: ignore[no-untyped-def]
     """Bake ambient occlusion with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_AO.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -692,6 +727,9 @@ def _handle_bake_ao(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_lightmap(**params):  # type: ignore[no-untyped-def]
     """Bake lightmap with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_LIGHTMAP.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -746,6 +784,9 @@ def _handle_bake_lightmap(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_combined(**params):  # type: ignore[no-untyped-def]
     """Bake combined with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_COMBINED.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -818,6 +859,9 @@ def _handle_bake_combined(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_diffuse(**params):  # type: ignore[no-untyped-def]
     """Bake diffuse with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_DIFFUSE.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -868,6 +912,9 @@ def _handle_bake_diffuse(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_glossy(**params):  # type: ignore[no-untyped-def]
     """Bake glossy with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_GLOSSY.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -918,6 +965,9 @@ def _handle_bake_glossy(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_shadow(**params):  # type: ignore[no-untyped-def]
     """Bake shadow with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_SHADOW.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -968,6 +1018,9 @@ def _handle_bake_shadow(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_displacement(**params):  # type: ignore[no-untyped-def]
     """Bake displacement with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_DISPLACEMENT.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -1062,6 +1115,9 @@ def _handle_bake_displacement(**params):  # type: ignore[no-untyped-def]
 
 def _handle_bake_emission(**params):  # type: ignore[no-untyped-def]
     """Bake emission with thread safety."""
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE_EMISSION.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",
@@ -1231,6 +1287,9 @@ def _handle_bake(**params):  # type: ignore[no-untyped-def]
     Generic bake action: bakes the specified type on the active object.
     Wraps any Cycles bake type (DIFFUSE, GLOSSY, NORMAL, etc.) via the 'bake_type' parameter.
     """
+    if params.get("output_path"):
+        return _BakeOutputPathDisabled(BakeAction.BAKE.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_bake",

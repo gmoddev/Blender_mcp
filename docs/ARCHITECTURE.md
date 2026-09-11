@@ -102,6 +102,8 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - Physics setup cannot accept caller-selected cache paths. Physics bake, simulation-play, and
   cache-clear entry points are disabled because scene-derived cache families cannot yet be
   enumerated, authorized, bounded, or reconciled before Blender writes or deletes them.
+- Texture bakes may mutate Blender-internal image datablocks, but caller-selected external output
+  paths are rejected before scene access at the registered handler and direct helper boundaries.
 
 ## Reference-Repositories Assessment
 
