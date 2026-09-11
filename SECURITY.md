@@ -85,17 +85,17 @@ those interfaces by this repository remains in scope.
 
 ## Known Limitations and Compensating Controls
 
-Protocol v1 now implements bounded framing, mutual local authentication,
-correlation, active-client limits, metadata-only logging on the primary request
-path, and initial capability enforcement. Effective Safe Mode and raw-code state
-is snapshotted before listener startup so socket-thread authorization does not
-touch Blender APIs. The action-level capability audit is incomplete.
+Protocol v2 implements bounded framing, mutual local authentication, proof-bound bridge-instance
+request namespaces, typed JSON-RPC identity, correlation, active-client limits, metadata-only
+logging on the primary request path, and initial capability enforcement. Effective Safe Mode and
+raw-code state is snapshotted before listener startup so socket-thread authorization does not touch
+Blender APIs. The action-level capability audit is incomplete.
 
-The shared dispatcher queue now has timeout/cancellation tombstones, duplicate
-detection, bounded in-process reconciliation, and truthful running-after-timeout
-states. These controls still require live Blender and reconnect/fault validation,
-and direct provider timer callbacks remain outside the ledger. The scene/export
-family now has a partial filesystem authority boundary. Multi-file glTF, USD
+The shared dispatcher queue now has timeout/cancellation tombstones, duplicate detection, bounded
+in-process reconciliation, and truthful running-after-timeout states. Blender 5.2.1 validates
+same-bridge reconnect, response loss, cross-bridge status/cancel denial, and shutdown behavior.
+Process-restart durability and direct provider timer callbacks remain outside the ledger. The
+scene/export family now has a partial filesystem authority boundary. Multi-file glTF, USD
 texture sidecars, and external asset packing are disabled pending complete
 input/output-family grants. Single viewport captures are write-root confined; multi-output capture
 and primary background rendering are disabled pending process, temporary-artifact, cleanup, and
