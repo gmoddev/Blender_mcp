@@ -181,6 +181,23 @@ Blender 5.2.1 background validation passes outside-root BVH denial without objec
 single-file BVH import, and FBX input-family denial. The remaining 0E audit proceeds to bake/cache
 directories and provider-managed artifacts.
 
+## Ninth Implementation Slice: Foundation 0E physics cache containment
+
+Every registered physics bake, cache-clear, and simulation-play action now declares
+`FILESYSTEM_WRITE` in addition to `MUTATE`, then fails closed with `CACHE_FAMILY_DISABLED` before
+inspecting or changing the scene.
+The direct rigid-body, cloth, fluid, particle, soft-body, aggregate-bake, playback, and cache-clear
+helpers no longer contain Blender bake, playback, or deletion sinks.
+
+Rigid-body, cloth, and fluid setup continue to work with Blender-managed defaults, but caller-supplied
+`cache_path` values fail with `CACHE_PATH_DISABLED` before scene access. Re-enablement requires an
+inventory of every cache member derived by Blender, canonical authorization of the complete family,
+per-member overwrite/delete policy, bounded storage, cleanup semantics, and reconciliation for long
+running bakes.
+
+This remains partial 0E. Texture-bake output paths and provider-managed temporary artifacts are the
+next filesystem families to contain before the shared 0F network/download/archive work.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

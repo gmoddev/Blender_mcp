@@ -44,6 +44,9 @@ Authorize the final concrete path immediately before the file sink:
     families can be enumerated as a unit.
 11. authorize single-file `.bvh` motion-capture inputs before Blender import, and quarantine FBX
     animation import until its content-selected linked inputs can be enumerated and authorized.
+12. reject caller-selected physics cache paths and quarantine physics bake, simulation-play, and
+    cache-clear actions until every scene-derived cache member and destructive operation can be
+    authorized before mutation.
 
 Grant `FILESYSTEM_READ` and `FILESYSTEM_WRITE` only when the corresponding validated root exists.
 Safe Mode may combine `READ` with `FILESYSTEM_READ`, but it never gains `MUTATE` or filesystem

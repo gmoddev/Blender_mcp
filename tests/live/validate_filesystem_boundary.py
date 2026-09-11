@@ -29,6 +29,7 @@ from blender_mcp.core.filesystem_boundary import (  # noqa: E402
 from blender_mcp.handlers.manage_headless_mode import manage_headless_mode  # noqa: E402
 from blender_mcp.handlers.manage_light import manage_light  # noqa: E402
 from blender_mcp.handlers.manage_mocap import manage_mocap  # noqa: E402
+from blender_mcp.handlers.manage_physics import manage_physics  # noqa: E402
 from blender_mcp.handlers.manage_scene import _handle_open_file, _handle_save_file  # noqa: E402
 from blender_mcp.handlers.manage_sequencer import _get_sequences, manage_sequencer  # noqa: E402
 
@@ -178,6 +179,30 @@ Frame Time: 0.0333333
     if _ErrorCode(DeniedFbx) != "INPUT_FAMILY_DISABLED":
         raise AssertionError(f"FBX input-family quarantine returned {DeniedFbx}")
 
+    OutsideCache = OutsideRoot / "physics-cache"
+    OutsideCache.mkdir()
+    CacheSentinel = OutsideCache / "sentinel.bin"
+    CacheSentinel.write_bytes(b"physics-cache-sentinel")
+    CacheDigest = _Digest(CacheSentinel)
+    RigidWorldBeforeDenial = bpy.context.scene.rigidbody_world
+    ObjectsBeforeCacheDenial = len(bpy.data.objects)
+    DeniedCachePath = manage_physics(
+        action="RIGID_BODY_WORLD_SETUP",
+        cache_path=str(OutsideCache),
+    )
+    if _ErrorCode(DeniedCachePath) != "CACHE_PATH_DISABLED":
+        raise AssertionError(f"physics cache-path quarantine returned {DeniedCachePath}")
+    for CacheAction in ("SIMULATION_PLAY", "ALL_BAKE", "ALL_CACHE_CLEAR"):
+        DeniedCacheAction = manage_physics(action=CacheAction)
+        if _ErrorCode(DeniedCacheAction) != "CACHE_FAMILY_DISABLED":
+            raise AssertionError(f"physics cache-family quarantine returned {DeniedCacheAction}")
+    if bpy.context.scene.rigidbody_world is not RigidWorldBeforeDenial:
+        raise AssertionError("denied physics cache path changed the rigid-body world")
+    if len(bpy.data.objects) != ObjectsBeforeCacheDenial:
+        raise AssertionError("denied physics cache operation changed scene objects")
+    if _Digest(CacheSentinel) != CacheDigest:
+        raise AssertionError("denied physics cache operation changed the sentinel")
+
     try:
         ExportValidator.check_path_injection(
             str(OutsideRoot / "force.glb"),
@@ -221,7 +246,7 @@ Frame Time: 0.0333333
         raise AssertionError(f"approved open failed: {ApprovedOpen}")
 
     print(
-        "[BlenderMCP:FilesystemLive] PASS containment, export, imports, and quarantines",
+        "[BlenderMCP:FilesystemLive] PASS containment, export, imports, caches, and quarantines",
         flush=True,
     )
 finally:

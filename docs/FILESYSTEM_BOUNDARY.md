@@ -64,6 +64,12 @@ Motion-capture BVH import accepts one authorized `.bvh` file. FBX animation impo
 because an approved primary file can name textures or other linked inputs outside the read root;
 those dependencies must be enumerated and authorized before Blender receives the file.
 
+Physics bake, simulation-play, and cache-clear actions are disabled because Blender derives cache
+directories and multiple cache members from mutable scene state. Their direct helpers contain no
+bake, playback, or deletion sinks. Physics setup rejects caller-selected `cache_path` values before
+scene access; setup without that parameter may configure simulation state but cannot invoke the
+quarantined cache-producing routes.
+
 The dispatcher requires `FILESYSTEM_READ` or `FILESYSTEM_WRITE` for those migrated actions. A
 configured root grants only the matching dedicated capability; Safe Mode still permits no mutation.
 The deprecated `force_export` input is denied and cannot skip resource or path policy.
@@ -78,8 +84,8 @@ overwrite protection.
 Mapped-drive and other network-backed local-looking roots are not yet identified reliably. Select
 roots on a trusted local volume until volume-origin enforcement is implemented.
 
-Other imported assets, bake/cache outputs, temporary provider
-artifacts, subprocess paths, and other exporter sidecars still need a repository-wide capability
+Other imported assets, texture-bake outputs, temporary provider artifacts, subprocess paths, and
+other exporter sidecars still need a repository-wide capability
 and sink audit. Multi-file glTF and USD texture sidecars remain disabled rather than implicitly
 sharing authority with a primary output. Some legacy callers already reach the central helper and
 therefore fail closed, but their action metadata and sidecar behavior are not yet fully classified.
@@ -87,7 +93,8 @@ Windows unit coverage exercises traversal,
 sibling-prefix, ambiguous syntax, overwrite, and final-extension behavior. Blender 5.2.1 live
 validation passes outside-root open/save/export denial, sentinel preservation, approved overwrite,
 approved GLB export, approved `.blend` open, a Windows junction escape, outside-root HDRI/BVH denial,
-approved `.hdr` and BVH loading, and headless/FBX quarantine without filesystem side effects.
+approved `.hdr` and BVH loading, and headless/FBX/physics-cache quarantine without filesystem side
+effects.
 Supported POSIX and broader live operator coverage remain required.
 
 Until those gates pass, use disposable `.blend` copies and treat Foundation 0E as partial.

@@ -26,6 +26,7 @@ from ..core.execution_engine import safe_ops
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.security import Capability
 from ..core.versioning import BlenderCompatibility
 from ..core.validation_utils import ValidationUtils
 from ..dispatcher import register_handler
@@ -34,6 +35,47 @@ from ..core.parameter_validator import validated_handler
 from ..core.enums import PhysicsAction
 
 logger = get_logger()
+
+PhysicsCacheActions = {
+    PhysicsAction.ALL_BAKE.value,
+    PhysicsAction.ALL_CACHE_CLEAR.value,
+    PhysicsAction.CLOTH_BAKE.value,
+    PhysicsAction.CLOTH_CACHE_CLEAR.value,
+    PhysicsAction.FLUID_BAKE.value,
+    PhysicsAction.FLUID_CACHE_CLEAR.value,
+    PhysicsAction.PARTICLE_BAKE.value,
+    PhysicsAction.RIGID_BODY_BAKE.value,
+    PhysicsAction.RIGID_BODY_CACHE_CLEAR.value,
+    PhysicsAction.SIMULATION_PLAY.value,
+    PhysicsAction.SOFT_BODY_BAKE.value,
+}
+PhysicsCapabilities = {Action.value: [Capability.MUTATE.value] for Action in PhysicsAction}
+for CacheAction in PhysicsCacheActions:
+    PhysicsCapabilities[CacheAction] = [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_WRITE.value,
+    ]
+
+
+def _CacheFamilyDisabled(Action: str) -> Dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_physics",
+        action=Action,
+        error_code="CACHE_FAMILY_DISABLED",
+        message=(
+            "Physics cache operations are disabled until every scene-derived cache path can be "
+            "authorized before mutation"
+        ),
+    )
+
+
+def _CachePathDisabled(Action: str) -> Dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_physics",
+        action=Action,
+        error_code="CACHE_PATH_DISABLED",
+        message="Custom physics cache paths are disabled pending filesystem authorization",
+    )
 
 
 @register_handler(
@@ -68,6 +110,7 @@ logger = get_logger()
         "required": ["action"],
     },
     actions=[a.value for a in PhysicsAction],
+    capabilities=PhysicsCapabilities,
     category="physics",
 )
 @ensure_main_thread
@@ -94,6 +137,12 @@ def manage_physics(action: Optional[str] = None, **params: Any) -> Dict[str, Any
             error_code="MISSING_PARAMETER",
             message="Missing required parameter: 'action'",
         )
+
+    if action in PhysicsCacheActions:
+        return _CacheFamilyDisabled(action)
+
+    if params.get("cache_path"):
+        return _CachePathDisabled(action)
 
     try:
         # Rigid Body Actions
@@ -180,10 +229,13 @@ def manage_physics(action: Optional[str] = None, **params: Any) -> Dict[str, Any
                 error_code="INVALID_PARAMETER_VALUE",
                 message=f"Unknown action: {action}",
             )
-    except Exception as e:
-        logger.error(f"manage_physics.{action} failed: {e}", exc_info=True)
+    except Exception:
+        logger.exception("[BlenderMCP:Physics] operation failed")
         return ResponseBuilder.error(
-            handler="manage_physics", action=action, error_code="EXECUTION_ERROR", message=str(e)
+            handler="manage_physics",
+            action=action,
+            error_code="EXECUTION_ERROR",
+            message="Physics operation failed",
         )
 
 
@@ -265,6 +317,9 @@ def _handle_rigid_body_world_setup(**params: Any) -> Dict[str, Any]:
 
     CRITICAL: Uses main thread execution for rigidbody.world_add.
     """
+    if params.get("cache_path"):
+        return _CachePathDisabled(PhysicsAction.RIGID_BODY_WORLD_SETUP.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_physics",
@@ -319,12 +374,6 @@ def _handle_rigid_body_world_setup(**params: Any) -> Dict[str, Any]:
         if isinstance(gravity, (list, tuple)) and len(gravity) == 3:
             scene.gravity = gravity
             scene.use_gravity = True
-
-        # Cache settings
-        cache_path = params.get("cache_path")
-        if cache_path:
-            rbw.point_cache.use_disk_cache = True
-            rbw.point_cache.filepath = cache_path
 
         # Return actual values set
         actual_steps = BlenderCompatibility.get_rigid_body_world_attr(rbw, "steps_per_second") or (
@@ -483,60 +532,9 @@ def _handle_rigid_body_remove(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_rigid_body_bake(**params: Any) -> Dict[str, Any]:
-    """Bake rigid body simulation with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="RIGID_BODY_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="RIGID_BODY_BAKE",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    if not scene.rigidbody_world:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="RIGID_BODY_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="Rigid body world not set up",
-        )
-
-    def bake_rigid_body() -> Dict[str, Any]:
-        frame_start = _coerce_int(params.get("frame_start", scene.frame_start))
-        frame_end = _coerce_int(params.get("frame_end", scene.frame_end))
-
-        # Set cache range
-        scene.rigidbody_world.point_cache.frame_start = frame_start
-        scene.rigidbody_world.point_cache.frame_end = frame_end
-
-        # Bake
-        with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-            safe_ops.ptcache.bake_all(bake=True)
-
-        return ResponseBuilder.success(
-            handler="manage_physics",
-            action="RIGID_BODY_BAKE",
-            data={"frame_start": frame_start, "frame_end": frame_end, "baked": True},
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(bake_rigid_body, timeout=300.0))
-    except Exception as e:
-        logger.error(f"RIGID_BODY_BAKE failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="RIGID_BODY_BAKE",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny rigid-body cache creation until its complete output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.RIGID_BODY_BAKE.value)
 
 
 # =============================================================================
@@ -584,6 +582,9 @@ CLOTH_PRESETS: dict[str, dict[str, float]] = {
 
 def _handle_cloth_setup(**params: Any) -> Dict[str, Any]:
     """Setup cloth simulation on object with thread safety."""
+    if params.get("cache_path"):
+        return _CachePathDisabled(PhysicsAction.CLOTH_SIM_SETUP.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_physics",
@@ -630,12 +631,6 @@ def _handle_cloth_setup(**params: Any) -> Dict[str, Any]:
         # Mass
         mass = _coerce_float(params.get("mass", 0.3), default=0.3, min_val=0.001)
         cloth.settings.mass = mass
-
-        # Cache
-        cache_path = params.get("cache_path")
-        if cache_path:
-            cloth.point_cache.use_disk_cache = True
-            cloth.point_cache.filepath = cache_path
 
         return ResponseBuilder.success(
             handler="manage_physics",
@@ -810,75 +805,9 @@ def _handle_cloth_unpin(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_cloth_bake(**params: Any) -> Dict[str, Any]:
-    """Bake cloth simulation with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CLOTH_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    obj_name = params.get("object_name")
-    obj, error = _get_object(obj_name)
-    if error:
-        return error
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CLOTH_BAKE",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    frame_start = _coerce_int(params.get("frame_start", scene.frame_start))
-    frame_end = _coerce_int(params.get("frame_end", scene.frame_end))
-
-    def bake_cloth() -> Dict[str, Any]:
-        # Find cloth modifier
-        for mod in obj.modifiers:
-            if mod.type == "CLOTH":
-                mod.point_cache.frame_start = frame_start
-                mod.point_cache.frame_end = frame_end
-                mod.point_cache.use_disk_cache = params.get("disk_cache", True)
-
-                # Bake
-                ContextManagerV3.set_active_object(obj)
-                with ContextManagerV3.temp_override(
-                    area_type="VIEW_3D", active_object=obj, selected_objects=[obj]
-                ):
-                    safe_ops.ptcache.bake(bake=True)
-
-                return ResponseBuilder.success(
-                    handler="manage_physics",
-                    action="CLOTH_BAKE",
-                    data={
-                        "object": obj.name,
-                        "frame_start": frame_start,
-                        "frame_end": frame_end,
-                        "baked": True,
-                    },
-                )
-
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CLOTH_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="No cloth modifier found on object",
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(bake_cloth, timeout=300.0))
-    except Exception as e:
-        logger.error(f"CLOTH_BAKE failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CLOTH_BAKE",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny cloth cache creation until its complete output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.CLOTH_BAKE.value)
 
 
 # =============================================================================
@@ -888,6 +817,9 @@ def _handle_cloth_bake(**params: Any) -> Dict[str, Any]:
 
 def _handle_fluid_domain_setup(**params: Any) -> Dict[str, Any]:
     """Setup fluid simulation domain."""
+    if params.get("cache_path"):
+        return _CachePathDisabled(PhysicsAction.FLUID_DOMAIN_SETUP.value)
+
     if not BPY_AVAILABLE:
         return ResponseBuilder.error(
             handler="manage_physics",
@@ -918,12 +850,6 @@ def _handle_fluid_domain_setup(**params: Any) -> Dict[str, Any]:
         # Resolution
         settings.resolution_max = _coerce_int(params.get("resolution", 64), min_val=1, max_val=1000)
         settings.time_scale = _coerce_float(params.get("time_scale", 1.0), min_val=0.001)
-
-        # Cache
-        cache_path = params.get("cache_path")
-        if cache_path:
-            settings.cache_directory = cache_path
-            settings.cache_type = "MODULAR"
 
         # Adaptive domain
         settings.use_adaptive_domain = params.get("adaptive", False)
@@ -1039,61 +965,9 @@ def _handle_fluid_add_effector(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_fluid_bake(**params: Any) -> Dict[str, Any]:
-    """Bake fluid simulation with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="FLUID_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="FLUID_BAKE",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    # Find fluid domain
-    domain = None
-    for obj in scene.objects:
-        for mod in obj.modifiers:
-            if mod.type == "FLUID" and mod.fluid_type == "DOMAIN":
-                domain = obj
-                break
-        if domain:
-            break
-
-    if not domain:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="FLUID_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="No fluid domain found",
-        )
-
-    def bake_fluid() -> Dict[str, Any]:
-        with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-            safe_ops.fluid.bake_all()
-        return ResponseBuilder.success(
-            handler="manage_physics",
-            action="FLUID_BAKE",
-            data={"domain": domain.name, "baked": True},
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(bake_fluid, timeout=600.0))
-    except Exception as e:
-        logger.error(f"FLUID_BAKE failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="FLUID_BAKE",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny fluid cache creation until its complete output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.FLUID_BAKE.value)
 
 
 # =============================================================================
@@ -1314,64 +1188,9 @@ def _handle_particle_emission(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_particle_bake(**params: Any) -> Dict[str, Any]:
-    """Bake particle system with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="PARTICLE_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    obj_name = params.get("object_name")
-    obj, error = _get_object(obj_name)
-    if error:
-        return error
-
-    if not obj.particle_systems:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="PARTICLE_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="No particle systems on object",
-        )
-
-    psys_name = params.get("system_name")
-
-    def bake_particles() -> Dict[str, Any]:
-        for psys in obj.particle_systems:
-            if psys_name and psys.name != psys_name:
-                continue
-
-            ContextManagerV3.set_active_object(obj)
-            with ContextManagerV3.temp_override(
-                area_type="VIEW_3D", active_object=obj, selected_objects=[obj]
-            ):
-                safe_ops.object.particle_system_bake()
-
-            return ResponseBuilder.success(
-                handler="manage_physics",
-                action="PARTICLE_BAKE",
-                data={"object": obj.name, "system": psys.name, "baked": True},
-            )
-
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="PARTICLE_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="Particle system not found",
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(bake_particles, timeout=300.0))
-    except Exception as e:
-        logger.error(f"PARTICLE_BAKE failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="PARTICLE_BAKE",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny particle cache creation until its complete output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.PARTICLE_BAKE.value)
 
 
 # =============================================================================
@@ -1570,71 +1389,9 @@ def _handle_soft_body_setup(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_soft_body_bake(**params: Any) -> Dict[str, Any]:
-    """Bake soft body simulation with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SOFT_BODY_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    obj_name = params.get("object_name")
-    obj, error = _get_object(obj_name)
-    if error:
-        return error
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SOFT_BODY_BAKE",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    frame_start = _coerce_int(params.get("frame_start", scene.frame_start))
-    frame_end = _coerce_int(params.get("frame_end", scene.frame_end))
-
-    def bake_soft_body() -> Dict[str, Any]:
-        for mod in obj.modifiers:
-            if mod.type == "SOFT_BODY":
-                mod.point_cache.frame_start = frame_start
-                mod.point_cache.frame_end = frame_end
-
-                ContextManagerV3.set_active_object(obj)
-                with ContextManagerV3.temp_override(
-                    area_type="VIEW_3D", active_object=obj, selected_objects=[obj]
-                ):
-                    safe_ops.ptcache.bake(bake=True)
-
-                return ResponseBuilder.success(
-                    handler="manage_physics",
-                    action="SOFT_BODY_BAKE",
-                    data={
-                        "object": obj.name,
-                        "baked": True,
-                        "frames": f"{frame_start}-{frame_end}",
-                    },
-                )
-
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SOFT_BODY_BAKE",
-            error_code="EXECUTION_ERROR",
-            message="No soft body modifier found",
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(bake_soft_body, timeout=300.0))
-    except Exception as e:
-        logger.error(f"SOFT_BODY_BAKE failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SOFT_BODY_BAKE",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny soft-body cache creation until its complete output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.SOFT_BODY_BAKE.value)
 
 
 # =============================================================================
@@ -1701,32 +1458,8 @@ def _handle_collision_setup(**params: Any) -> Dict[str, Any]:
 
 
 def _handle_simulation_play() -> Dict[str, Any]:
-    """Start simulation playback with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SIMULATION_PLAY",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    def play() -> Dict[str, Any]:
-        with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-            safe_ops.screen.animation_play()
-        return ResponseBuilder.success(
-            handler="manage_physics", action="SIMULATION_PLAY", data={"status": "playing"}
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(play, timeout=10.0))
-    except Exception as e:
-        logger.error(f"SIMULATION_PLAY failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="SIMULATION_PLAY",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny playback that can populate scene-selected simulation caches."""
+    return _CacheFamilyDisabled(PhysicsAction.SIMULATION_PLAY.value)
 
 
 def _handle_simulation_stop() -> Dict[str, Any]:
@@ -1759,147 +1492,22 @@ def _handle_simulation_stop() -> Dict[str, Any]:
 
 
 def _handle_all_bake(**params: Any) -> Dict[str, Any]:
-    """Bake all simulations in scene."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="ALL_BAKE",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="ALL_BAKE",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    frame_start = _coerce_int(params.get("frame_start", scene.frame_start))
-    frame_end = _coerce_int(params.get("frame_end", scene.frame_end))
-
-    baked = []
-
-    # Rigid body
-    if scene.rigidbody_world:
-        _handle_rigid_body_bake(**params)
-        baked.append("rigid_body")
-
-    # Cloth and soft body per object
-    for obj in scene.objects:
-        for mod in obj.modifiers:
-            if mod.type == "CLOTH":
-                _handle_cloth_bake(object_name=obj.name, **params)
-                baked.append(f"cloth:{obj.name}")
-            elif mod.type == "SOFT_BODY":
-                _handle_soft_body_bake(object_name=obj.name, **params)
-                baked.append(f"soft_body:{obj.name}")
-
-    return ResponseBuilder.success(
-        handler="manage_physics",
-        action="ALL_BAKE",
-        data={"baked_systems": baked, "frame_range": f"{frame_start}-{frame_end}"},
-    )
+    """Deny aggregate cache creation until every output family is authorized."""
+    del params
+    return _CacheFamilyDisabled(PhysicsAction.ALL_BAKE.value)
 
 
 def _handle_all_cache_clear() -> Dict[str, Any]:
-    """Clear all simulation caches with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="ALL_CACHE_CLEAR",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    scene = ContextManagerV3.get_scene()
-    if not scene:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="ALL_CACHE_CLEAR",
-            error_code="NO_SCENE",
-            message="No scene available",
-        )
-
-    def clear_all() -> Dict[str, Any]:
-        cleared = []
-
-        # Rigid body
-        if scene.rigidbody_world:
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                safe_ops.ptcache.free_bake_all()
-            cleared.append("rigid_body")
-
-        # Per-object caches
-        for obj in scene.objects:
-            for mod in obj.modifiers:
-                if mod.type in {"CLOTH", "SOFT_BODY"}:
-                    mod.point_cache.free_bake()
-                    cleared.append(f"{mod.type.lower()}:{obj.name}")
-
-        return ResponseBuilder.success(
-            handler="manage_physics", action="ALL_CACHE_CLEAR", data={"cleared_caches": cleared}
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(clear_all, timeout=60.0))
-    except Exception as e:
-        logger.error(f"ALL_CACHE_CLEAR failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="ALL_CACHE_CLEAR",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny aggregate cache deletion until every target path is authorized."""
+    return _CacheFamilyDisabled(PhysicsAction.ALL_CACHE_CLEAR.value)
 
 
 def _handle_cache_clear(sim_type: str, obj_name: Optional[str] = None) -> Dict[str, Any]:
-    """Clear specific cache type with thread safety."""
-    if not BPY_AVAILABLE:
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CACHE_CLEAR",
-            error_code="NO_CONTEXT",
-            message="bpy not available",
-        )
-
-    def clear_cache() -> Dict[str, Any]:
-        if sim_type == "RIGID_BODY":
-            with ContextManagerV3.temp_override(area_type="VIEW_3D"):
-                safe_ops.ptcache.free_bake_all()
-            return ResponseBuilder.success(
-                handler="manage_physics", action="CACHE_CLEAR", data={"cleared": "rigid_body"}
-            )
-
-        elif sim_type in ["CLOTH", "SOFT_BODY"] and obj_name:
-            obj = bpy.data.objects.get(obj_name)
-            if obj:
-                for mod in obj.modifiers:
-                    if mod.type == sim_type:
-                        # mypy: point_cache exists on specific modifiers
-                        mod.point_cache.free_bake()  # type: ignore
-                        return ResponseBuilder.success(
-                            handler="manage_physics",
-                            action="CACHE_CLEAR",
-                            data={"cleared": f"{sim_type.lower()}:{obj.name}"},
-                        )
-
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CACHE_CLEAR",
-            error_code="EXECUTION_ERROR",
-            message=f"Unknown cache type: {sim_type}",
-        )
-
-    try:
-        return cast(Dict[str, Any], execute_on_main_thread(clear_cache, timeout=30.0))
-    except Exception as e:
-        logger.error(f"CACHE_CLEAR failed: {e}", exc_info=True)
-        return ResponseBuilder.error(
-            handler="manage_physics",
-            action="CACHE_CLEAR",
-            error_code="EXECUTION_ERROR",
-            message=str(e),
-        )
+    """Deny cache deletion until the selected cache target is authorized."""
+    del obj_name
+    ActionByType = {
+        "RIGID_BODY": PhysicsAction.RIGID_BODY_CACHE_CLEAR.value,
+        "CLOTH": PhysicsAction.CLOTH_CACHE_CLEAR.value,
+        "FLUID": PhysicsAction.FLUID_CACHE_CLEAR.value,
+    }
+    return _CacheFamilyDisabled(ActionByType.get(sim_type, "CACHE_CLEAR"))

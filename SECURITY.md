@@ -103,7 +103,9 @@ preview outputs, other sidecars, atomic publication, and live cross-platform val
 open. HDRI setup is read-root confined to `.hdr`/`.exr`, and legacy headless render entry points are
 disabled until compositor and scene-derived outputs can be authorized as a complete family.
 Single-file motion-capture input is limited to authorized `.bvh`; FBX animation import is disabled
-until its linked inputs can be preauthorized. Other known gaps remain in external
+until its linked inputs can be preauthorized. Physics bake, simulation-play, and cache-clear routes
+are disabled and custom physics cache paths are rejected until their scene-derived file families
+can be enumerated, authorized, bounded, and reconciled. Other known gaps remain in external
 integration isolation, provider credential storage, download/archive limits,
 selector complexity, checkpoint recovery, and the remaining logging surface.
 These are scan targets, not accepted risks.

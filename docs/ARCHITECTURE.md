@@ -99,6 +99,9 @@ handshake; version 1 does not claim per-frame cryptographic integrity.
 - Motion-capture BVH files cross the central read-root boundary before Blender import. FBX animation
   import remains disabled because the native importer can expand one primary file into a family of
   content-selected external reads.
+- Physics setup cannot accept caller-selected cache paths. Physics bake, simulation-play, and
+  cache-clear entry points are disabled because scene-derived cache families cannot yet be
+  enumerated, authorized, bounded, or reconciled before Blender writes or deletes them.
 
 ## Reference-Repositories Assessment
 
