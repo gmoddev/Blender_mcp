@@ -73,7 +73,8 @@ means the invariant is required but not yet proven by the current implementation
 - Hyper3D, Sketchfab, and Poly Haven now match Hunyuan quarantine: `STATUS` is read-only and truthful;
   every external action declares its real dedicated capabilities and fails before retired network,
   local-file, download, temporary-artifact, credential, or Blender-import sinks.
-- `blender_mcp/handlers/manage_rigging.py`: multi-mesh bounds are summed then divided by eight.
+- Combined metarig bounds use world-space extrema rather than a fixed corner divisor; focused unit
+  tests cover single meshes, separated multi-mesh targets, and empty input.
 - Package metadata and `LICENSE` agree on MIT; the complete copied/adapted-source provenance and
   release-notice inventory remains open under `LIC-001`.
 

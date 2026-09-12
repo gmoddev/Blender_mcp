@@ -11,7 +11,7 @@ Features:
 High Mode Philosophy: Robust rigging that survives animation.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 try:
     import bpy
@@ -32,6 +32,20 @@ from ..core.enums import RiggingAction, ConstraintType, Mode
 from ..core.validation_utils import ValidationUtils
 
 logger = get_logger()
+
+
+def CalculateMetarigBounds(WorldBounds: Sequence[Any]) -> Tuple[float, float, float, float]:
+    """Return the X/Y center, minimum Z, and height of combined world-space bounds."""
+    if not WorldBounds:
+        raise ValueError("At least one world-space bound point is required")
+
+    MinX = min(Point.x for Point in WorldBounds)
+    MaxX = max(Point.x for Point in WorldBounds)
+    MinY = min(Point.y for Point in WorldBounds)
+    MaxY = max(Point.y for Point in WorldBounds)
+    MinZ = min(Point.z for Point in WorldBounds)
+    MaxZ = max(Point.z for Point in WorldBounds)
+    return (MinX + MaxX) / 2.0, (MinY + MaxY) / 2.0, MinZ, MaxZ - MinZ
 
 
 @register_handler(
@@ -209,12 +223,7 @@ def _handle_generate_metarig(params: Dict[str, Any]) -> Dict[str, Any]:
         local_b = [mathutils.Vector(v) for v in m.bound_box]
         global_bbox.extend([m.matrix_world @ v for v in local_b])
 
-    min_z = min(v.z for v in global_bbox)
-    max_z = max(v.z for v in global_bbox)
-    height = max_z - min_z
-
-    center_x = sum(v.x for v in global_bbox) / 8.0
-    center_y = sum(v.y for v in global_bbox) / 8.0
+    center_x, center_y, min_z, height = CalculateMetarigBounds(global_bbox)
 
     # 3. Spawn MetaRig
     ContextManagerV3.deselect_all_objects()

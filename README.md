@@ -1,4 +1,4 @@
-> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This fork currently registers 70 tool groups and 590 actions while hardening the system toward a production-grade architecture. The current unit suite collects 726 tests.
+> **Inspired by [blender-mcp](https://github.com/ahujasid/blender-mcp) by Siddharth Ahuja** — the original proof-of-concept that demonstrated connecting AI agents to Blender over MCP. This fork currently registers 70 tool groups and 590 actions while hardening the system toward a production-grade architecture. The current unit suite collects 729 tests.
 
 ---
 
@@ -111,7 +111,7 @@ uv sync --all-extras
 
 # Verify everything works (no Blender needed for tests)
 uv run pytest tests/unit -q
-# → 725 passed, 1 skipped
+# → 728 passed, 1 skipped
 ```
 
 `uv sync` creates `.venv/` in the project directory — your system Python stays clean.
@@ -441,22 +441,22 @@ Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock
 integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 726 collected: 725 passed, 1 skipped
-uv run pytest --collect-only -q          # 774 total cases currently collected
+uv run pytest tests/unit -q              # 729 collected: 728 passed, 1 skipped
+uv run pytest --collect-only -q          # 777 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
 ```
 
 <details>
-<summary>Coverage map — 27 unit test files</summary>
+<summary>Coverage map — 28 unit test files</summary>
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
 | Protocol, authentication, transport, policy, and privacy | 5 files | 69 |
 | Dispatcher and bridge routing/validation | 3 files | 63 |
-| Existing handlers and core behavior | 19 files | 594 |
-| **Total** | **27 test files** | **726** |
+| Existing handlers and core behavior | 20 files | 597 |
+| **Total** | **28 test files** | **729** |
 
 </details>
 
@@ -598,7 +598,7 @@ Blender_mcp/
 │       ├── check_tool_groups.py     Tool group integrity
 │       └── lint_imports.py          Import architecture rules
 ├── tests/
-│   ├── unit/                        726 unit tests (27 files, no Blender needed)
+│   ├── unit/                        729 unit tests (28 files, no Blender needed)
 │   ├── integration/                 48 collected mock + live integration cases
 │   └── TESTS.md                     Test suite documentation
 ├── docs/

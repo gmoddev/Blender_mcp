@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **726** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **729** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **774** |
+| **Grand total collected** | | | **777** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -284,6 +284,15 @@ uv run pytest tests/unit/test_scene_graph_geo_center.py -v
 
 ---
 
+### `test_metarig_bounds.py` (3 tests)
+Combined world-space metarig bounds for single meshes, separated mesh sets, and empty input.
+
+```bash
+uv run pytest tests/unit/test_metarig_bounds.py -v
+```
+
+---
+
 ## Integration Tests (`tests/integration/`)
 
 | Mode | Requires | Files |
@@ -331,10 +340,11 @@ uv run pytest tests/integration/test_incident_replay_p11.py -v
 | `test_smoke.py` | 9 | Project structure sanity |
 | `test_manage_history.py` | 8 | `handlers/manage_history.py` |
 | `test_scene_graph_geo_center.py` | 5 | Geometry center computation |
+| `test_metarig_bounds.py` | 3 | Combined metarig center and height computation |
 | `test_logging_privacy.py` | 3 | Metadata-only logging |
-| **Unit total** | **726** | 725 passed, 1 skipped in the documented baseline run |
+| **Unit total** | **729** | 728 passed, 1 skipped in the documented baseline run |
 | Integration files | 48 | 24 mock plus 24 live Blender cases |
-| **Grand total collected** | **774** | 749 passed, 25 skipped in the documented full run |
+| **Grand total collected** | **777** | 752 passed, 25 skipped in the documented full run |
 
 ---
 

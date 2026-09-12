@@ -352,7 +352,7 @@ tests, structured output, and documented retry semantics.
 | P1 | Remove telemetry preference and legacy command | No active telemetry sender or runtime preference remains; network-isolation evidence is still required for `PRIV-002`. |
 | P1 | Add peer authentication and rotation | Protocol v2 mutual HMAC, user-scoped credential precedence, rotation, and socket revocation are live-tested. |
 | P1 | Add explicit frame-size limit | Fixed with pre-auth and normal-frame bounds plus JSON node/depth limits. |
-| P1 | Fix multi-mesh metarig center calculation | Open: `manage_rigging.py` still divides combined bounding points by eight. |
+| P1 | Fix multi-mesh metarig center calculation | Fixed: combined world-space extrema determine the center and height; single-, multi-mesh, and empty-input unit tests cover the calculation. |
 | P2 | Reconcile package license metadata | Fixed: `LICENSE` and `pyproject.toml` both declare MIT. Release provenance inventory remains open. |
 | P2 | Remove malformed historical comment block | Fixed: the non-functional repair narrative is absent from `stdio_bridge.py`. |
 
