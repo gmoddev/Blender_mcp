@@ -12,6 +12,7 @@ ExpectedMypyTargets = {
     "blender_mcp/core/session.py",
     "blender_mcp/core/security.py",
     "blender_mcp/core/filesystem_boundary.py",
+    "blender_mcp/core/network_boundary.py",
     "blender_mcp/core/credential_store.py",
     "blender_mcp/core/logging_config.py",
     "stdio_bridge.py",

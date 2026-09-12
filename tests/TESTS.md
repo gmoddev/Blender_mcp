@@ -1,14 +1,14 @@
 # Blender MCP — Test Suite Reference
 
-> live-37 | Last Updated: 2026-03-09
+> live-37 | Last Updated: 2026-09-11
 
 ## Overview
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **735** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **827** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **783** |
+| **Grand total collected** | | | **875** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -35,6 +35,17 @@ make test-cov     # Full suite with HTML + XML coverage
 ---
 
 ## Unit Test Files (`tests/unit/`)
+
+### `test_network_boundary.py` (48 tests)
+
+Purpose-scoped HTTPS and download boundary tests. Covers exact scheme/host/port/path/query policy,
+public-only bounded DNS, connected-peer binding, redirect reauthorization, verified TLS without
+ambient key logging, aggregate deadlines, response metadata/framing/type/encoding limits, declared
+and streamed byte bounds, exact length, exclusive request-owned artifacts, and failure cleanup.
+
+```bash
+uv run pytest tests/unit/test_network_boundary.py -v
+```
 
 ### `test_essential_tools.py` (182 tests)
 Comprehensive tests for all 8 ESSENTIAL tier tools (priority ≤ 9). All tests run through `dispatch_command` (real execution path) with mocked bpy.

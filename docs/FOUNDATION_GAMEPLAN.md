@@ -354,6 +354,26 @@ provider content selection, and off-main-thread provider-job lifecycle remain op
 Blender 5.2.1 embedded-Python validation passes a bounded extraction and cleanup plus traversal
 denial without outside output or residual artifacts.
 
+## Twentieth Implementation Slice: Foundation 0F/0I network and download boundary
+
+The shared network boundary now requires an immutable purpose policy before any request. HTTPS
+scheme, canonical exact host, port, component-aware path, query behavior, content type, redirects,
+headers, response bytes, chunks, DNS work, and DNS/connect/read/total deadlines are bounded. Every
+DNS answer must be public, the connection is pinned to an approved numeric address, and the peer is
+rechecked before and after verified TLS. Redirects repeat the complete authorization and resolution
+sequence. The TLS context cannot inherit environment-enabled key logging.
+
+Successful bodies stream into exclusively created files beneath opaque request-owned artifact
+workspaces. Declared oversize, streamed oversize, truncated declared bodies, ambiguous framing,
+encoded content, invalid metadata, timeouts, and transport errors fail closed and remove partial
+output. Unit tests use deterministic transports; Blender 5.2.1 embedded-Python validation proves
+approved redirect streaming and oversize cleanup without an external request.
+
+This is a reusable helper, not provider enablement. Provider-specific endpoint and content
+contracts, trusted artifact-root startup policy, credential/header binding, controlled live-network
+fixtures, cancellation and restart reconciliation, off-main-thread provider jobs, and bounded
+main-thread import remain open. All external actions stay quarantined.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

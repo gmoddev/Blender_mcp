@@ -30,9 +30,12 @@ but cannot revoke a callback or function reference that old code already capture
 
 The shared ZIP boundary now supplies preflight member/path/type/collision checks, compressed and
 expanded resource budgets, bounded streaming extraction, opaque request-owned workspaces, and
-cleanup on success or failure. It is not wired to any provider. A configured artifact-root policy,
-safe HTTP/download layer, provider-specific content contract, and provider job lifecycle are still
-required before it can receive external data.
+cleanup on success or failure. The shared HTTPS/download boundary now supplies exact purpose
+policies, all-address DNS validation, pinned-peer checks, manual redirect reauthorization, verified
+TLS, deadlines, response budgets, media/framing checks, exclusive artifact creation, and partial
+cleanup. Neither helper is wired to a provider. A configured artifact-root startup policy,
+provider-specific endpoint/content contract, credential binding, and provider job lifecycle are
+still required before external data can reach Blender.
 
 The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
 from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed

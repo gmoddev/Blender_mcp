@@ -80,8 +80,11 @@ authentication; it does not claim per-frame cryptographic integrity.
 
 `core/archive_boundary.py` owns provider ZIP inspection, bounded streaming extraction, and opaque
 request-owned artifact workspaces. It is Blender-independent and must run off the main thread.
-Providers remain quarantined until a separate purpose-scoped network client and provider-job
-lifecycle feed this boundary without accepting caller-selected URLs or implicit artifact roots.
+`core/network_boundary.py` owns immutable HTTPS purpose policies, URL/DNS/redirect/peer/TLS checks,
+deadlines, response budgets, and streaming downloads into those workspaces. It is also
+Blender-independent and must run off the main thread. Providers remain quarantined until trusted
+provider contracts and a provider-job lifecycle feed both boundaries without accepting
+caller-selected URLs, arbitrary headers, or implicit artifact roots.
 
 ## Migration Risks
 
@@ -127,7 +130,9 @@ lifecycle feed this boundary without accepting caller-selected URLs or implicit 
   download, content-validation, temporary-artifact, and provider-job services exist. External
   actions carry their real capability metadata and are denied at dispatcher and direct boundaries.
 - ZIP artifacts now have a shared preflight and extraction boundary with deterministic in-process
-  cleanup. Startup cleanup/reconciliation, safe downloading, provider-specific file selection, and
+  cleanup. Purpose-scoped HTTPS downloads now reauthorize redirects, bind DNS to the connected peer,
+  verify TLS, enforce deadlines and response budgets, and clean partial request workspaces. Startup
+  cleanup/reconciliation, controlled live-network fixtures, provider-specific file selection, and
   integration into off-main-thread jobs remain open, so this foundation does not make a provider
   operational.
 

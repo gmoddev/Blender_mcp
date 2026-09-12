@@ -53,6 +53,20 @@ The script creates a unique OS-temporary test root, extracts a bounded archive i
 request workspace, verifies context cleanup, denies traversal before workspace creation, checks
 that no outside file appeared, and removes the test root.
 
+## Network boundary
+
+Run the deterministic HTTPS/download helper checks in Blender's embedded Python runtime. The
+transport is simulated and makes no external request:
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_network_boundary.py
+```
+
+The script reauthorizes and resolves an approved redirect, streams a bounded artifact into an
+opaque request workspace, closes both connections, denies an oversized body, proves failure
+cleanup, and removes the test root.
+
 ## Installed credential extension
 
 Build and install the extension into a disposable Blender user resource directory, then run
