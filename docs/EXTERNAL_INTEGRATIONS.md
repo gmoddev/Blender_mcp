@@ -34,8 +34,11 @@ cleanup on success or failure. The shared HTTPS/download boundary now supplies e
 policies, all-address DNS validation, pinned-peer checks, manual redirect reauthorization, verified
 TLS, deadlines, response budgets, media/framing checks, exclusive artifact creation, and partial
 cleanup. Neither helper is wired to a provider. A configured artifact-root startup policy,
-provider-specific endpoint/content contract, credential binding, and provider job lifecycle are
-still required before external data can reach Blender.
+provider-specific endpoint/content contract, credential binding, and handler integration are still
+required before external data can reach Blender. The shared provider-job lifecycle now supplies
+bounded worker preparation, request/digest reconciliation, cooperative cancellation, serialized
+main-thread commit admission, worker cleanup, and metadata-only terminal state. It is likewise not
+wired to a provider and does not replace provider-specific content or native-import validation.
 
 The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
 from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed
@@ -51,6 +54,6 @@ and credential-serialization tests. Hiding a handler or checking a UI toggle is 
 
 Every provider additionally requires an evidence-backed provider contract: fixed purpose-specific
 endpoints or provider asset identifiers, documented redirect behavior, response/archive formats,
-and safe resource budgets. Its provider job must retain the initiating MCP request ID through
-off-main-thread preparation and bounded main-thread commit, check native import results, and expose
-truthful terminal/reconciliation state.
+and safe resource budgets. Its handler must submit through the shared provider-job lifecycle,
+retain the initiating MCP request ID through off-main-thread preparation and bounded main-thread
+commit, check native import results, and expose truthful terminal/reconciliation state.

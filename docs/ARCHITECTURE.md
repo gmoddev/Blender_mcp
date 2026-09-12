@@ -83,8 +83,10 @@ request-owned artifact workspaces. It is Blender-independent and must run off th
 `core/network_boundary.py` owns immutable HTTPS purpose policies, URL/DNS/redirect/peer/TLS checks,
 deadlines, response budgets, and streaming downloads into those workspaces. It is also
 Blender-independent and must run off the main thread. Providers remain quarantined until trusted
-provider contracts and a provider-job lifecycle feed both boundaries without accepting
-caller-selected URLs, arbitrary headers, or implicit artifact roots.
+provider contracts feed both boundaries without accepting caller-selected URLs, arbitrary headers,
+or implicit artifact roots. `core/provider_jobs.py` owns bounded worker preparation, request/digest
+reconciliation, cancellation, serialized main-thread commit admission, worker cleanup, and a
+metadata-only retained ledger. It is not connected to the quarantined handlers.
 
 ## Migration Risks
 
@@ -132,9 +134,9 @@ caller-selected URLs, arbitrary headers, or implicit artifact roots.
 - ZIP artifacts now have a shared preflight and extraction boundary with deterministic in-process
   cleanup. Purpose-scoped HTTPS downloads now reauthorize redirects, bind DNS to the connected peer,
   verify TLS, enforce deadlines and response budgets, and clean partial request workspaces. Startup
-  cleanup/reconciliation, controlled live-network fixtures, provider-specific file selection, and
-  integration into off-main-thread jobs remain open, so this foundation does not make a provider
-  operational.
+  cleanup/reconciliation and controlled live-network fixtures remain open. Provider work now has a
+  bounded worker-prepare/main-thread-commit lifecycle, but provider-specific file selection and
+  handler integration remain open, so this foundation does not make a provider operational.
 
 ## Reference-Repositories Assessment
 

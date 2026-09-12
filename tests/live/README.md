@@ -67,6 +67,19 @@ The script reauthorizes and resolves an approved redirect, streams a bounded art
 opaque request workspace, closes both connections, denies an oversized body, proves failure
 cleanup, and removes the test root.
 
+## Provider job boundary
+
+Run the worker-preparation and main-thread-commit lifecycle in a disposable Blender process:
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_provider_jobs.py
+```
+
+The script prepares a temporary artifact on a provider worker, commits one canary object only on
+Blender's main thread, removes the artifact on a worker, verifies the terminal result, and removes
+the canary and temporary root. It performs no external network request.
+
 ## Installed credential extension
 
 Build and install the extension into a disposable Blender user resource directory, then run

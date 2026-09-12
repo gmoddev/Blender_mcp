@@ -374,6 +374,25 @@ contracts, trusted artifact-root startup policy, credential/header binding, cont
 fixtures, cancellation and restart reconciliation, off-main-thread provider jobs, and bounded
 main-thread import remain open. All external actions stay quarantined.
 
+## Twenty-First Implementation Slice: Foundation 0D/0F/0I provider job lifecycle
+
+A dedicated Blender-independent provider lifecycle now bounds worker count, active jobs, retained
+history, retention time, and reconciliation waits. It preserves a request ID, purpose, and request
+digest; exact duplicates reconcile to the existing job while conflicting reuse fails closed.
+Preparation runs on provider workers, prepared work enters one serialized commit queue, only the
+captured Blender main thread may commit, and artifact cleanup returns to a worker.
+
+Queued cancellation tombstones preparation. Once preparation starts, cancellation is cooperative
+and never claims retry safety; prepared cancellation skips commit and cleans the payload. A running
+commit cannot be cancelled or raced by shutdown. Fixed terminal states distinguish successful,
+failed, cancelled, and cleanup-failed outcomes without retaining exception text, arbitrary metadata,
+callbacks, prepared values, or captured closure data in the public or terminal ledger.
+
+Blender 5.2.1 embedded-Python validation proves off-main-thread preparation and cleanup plus a
+main-thread-only canary mutation in a disposable factory session. Providers remain quarantined.
+Provider contracts, real network fixtures, artifact-root startup/crash reconciliation, credential
+binding, provider content selection, native-import result checks, and integration are still open.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

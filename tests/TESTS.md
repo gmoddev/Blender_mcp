@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **827** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **847** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **875** |
+| **Grand total collected** | | | **895** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -35,6 +35,17 @@ make test-cov     # Full suite with HTML + XML coverage
 ---
 
 ## Unit Test Files (`tests/unit/`)
+
+### `test_provider_jobs.py` (20 tests)
+
+Provider lifecycle tests cover bounded admission and retention, exact duplicate reconciliation,
+conflicting request identity, queued/running/prepared cancellation, retry truth, main-thread-only
+initialization/commit/shutdown, worker cleanup, redacted failures, explicit cleanup-failure states,
+shutdown races, callback/payload release, and bounded waits.
+
+```bash
+uv run pytest tests/unit/test_provider_jobs.py -v
+```
 
 ### `test_network_boundary.py` (48 tests)
 

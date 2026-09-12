@@ -25,7 +25,7 @@ In practice: tell your AI *"create a red metallic sphere above the cube"* or *"c
 
 > **Raw Python is a separate high-risk capability.** `execute_blender_code`, text-block execution, and the legacy alias run unrestricted Python with the Blender user's authority. They are denied in Safe Mode and remain denied in Full Structured Mode until **Allow Raw Python** is explicitly enabled.
 
-> **Asset safety status.** Foundation 0 is not complete. The scene/export family uses explicit local read/write roots, and shared network/download/archive helpers are bounded, but providers remain quarantined while their contracts, job lifecycle, atomic publication, and live cross-platform validation remain open. Continue using disposable `.blend` copies.
+> **Asset safety status.** Foundation 0 is not complete. The scene/export family uses explicit local read/write roots, and shared network/download/archive plus provider-job helpers are bounded, but providers remain quarantined while their contracts, handler integration, atomic publication, and live cross-platform validation remain open. Continue using disposable `.blend` copies.
 
 ---
 
@@ -443,20 +443,20 @@ Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock
 integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 827 collected: 826 passed, 1 skipped
-uv run pytest --collect-only -q          # 875 total cases currently collected
+uv run pytest tests/unit -q              # 847 collected: 846 passed, 1 skipped
+uv run pytest --collect-only -q          # 895 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
 ```
 
 <details>
-<summary>Coverage map — 35 unit test files</summary>
+<summary>Coverage map — 36 unit test files</summary>
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
-| Complete unit suite | 35 files | 827 |
-| **Total** | **35 test files** | **827** |
+| Complete unit suite | 36 files | 847 |
+| **Total** | **36 test files** | **847** |
 
 </details>
 
