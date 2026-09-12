@@ -70,6 +70,8 @@ dispatch. `MCPBridge` owns the client session and poisons a socket after any amb
 `core/security.py` owns capability policy; dispatcher metadata supplies action-level requirements.
 The security module owns no `bpy` reference. Authorization preference changes deliberately require
 a server restart; future dynamic updates must publish a new snapshot from a main-thread callback.
+The legacy `utils.path` and `utils.path_validator` modules are exact compatibility adapters into the
+core-owned filesystem boundary; the architecture gate permits no other `utils`-to-`core` imports.
 
 Secrets never appear in protocol logs or message previews. The control credential is outside Scene,
 but OS-backed storage is still required. Protocol v2 binds a bridge-instance namespace and session

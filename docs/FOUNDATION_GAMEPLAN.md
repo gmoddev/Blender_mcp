@@ -282,6 +282,21 @@ Blender 5.2.1 validation proves outside-root GLB image denial without output cre
 export, OBJ export without `.mtl`, and USD export without a texture directory. Atomic publication,
 extension-defined inputs, complex image families, and the remaining sink inventory keep 0E partial.
 
+## Fifteenth Implementation Slice: Foundation 0 fast-gate cleanup
+
+Quarantined background and multi-view rendering no longer retain unreachable process, temporary
+file, and derived-output sink bodies after their unconditional denials. Their negative tests prove
+denial occurs before scene access, including the base64 multi-view route.
+
+The import-architecture gate now recognizes only the two exact legacy filesystem compatibility
+adapters as permitted `utils`-to-`core` delegates. Focused tests prove ordinary utility modules still
+cannot import `core`, and the adapters still cannot import handlers. This preserves existing public
+imports without weakening the general dependency rule.
+
+The fast eight-check quality gate passes. The stricter twelve-check gate still records inherited
+repository-wide formatter drift and Blender-stub mypy failures; those remain separate cleanup work
+and are not treated as evidence that this containment slice failed.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

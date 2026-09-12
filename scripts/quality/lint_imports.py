@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import List
 
 
+CompatibilityAdapters = {
+    "blender_mcp/utils/path.py",
+    "blender_mcp/utils/path_validator.py",
+}
+
+
 class ImportVisitor(ast.NodeVisitor):
     def __init__(self, file_path: Path):
         self.file_path = file_path
@@ -40,6 +46,7 @@ class ImportVisitor(ast.NodeVisitor):
         # Context-based rules
         is_core = "core" in self.module_path
         is_utils = "utils" in self.module_path
+        is_compatibility_adapter = self.file_path.as_posix() in CompatibilityAdapters
 
         # Rule 2: Core cannot import Handlers
         if is_core and "handlers" in module_name:
@@ -52,8 +59,8 @@ class ImportVisitor(ast.NodeVisitor):
         # Rule 3: Utils cannot import Core or Handlers
         if is_utils:
             if "core" in module_name and "utils" not in module_name:
-                # Whitelist logging config
-                if "logging_config" not in module_name:
+                # These exact legacy public adapters delegate to the central policy owner.
+                if "logging_config" not in module_name and not is_compatibility_adapter:
                     self.errors.append(
                         f"Line {lineno}: Utils module importing Core layer '{module_name}'"
                     )

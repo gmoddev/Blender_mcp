@@ -873,9 +873,7 @@ def test_render_execution_is_quarantined_before_scene_or_process_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     GetScene = MagicMock(side_effect=AssertionError("scene should not be accessed"))
-    Submit = MagicMock(side_effect=AssertionError("process should not be submitted"))
     monkeypatch.setattr(RenderingModule.ContextManagerV3, "get_scene", GetScene)
-    monkeypatch.setattr(RenderingModule.AsyncJobManager, "submit_job", Submit)
 
     FrameResult = RenderingModule._handle_render_frame(filepath="frame.png")
     AnimationResult = RenderingModule._handle_render_animation(filepath="animation.mp4")
@@ -885,7 +883,7 @@ def test_render_execution_is_quarantined_before_scene_or_process_access(
     assert ErrorCode(AnimationResult) == "PROCESS_EXECUTION_DISABLED"
     assert ErrorCode(SubmitResult) == "PROCESS_EXECUTION_DISABLED"
     GetScene.assert_not_called()
-    Submit.assert_not_called()
+    assert not hasattr(RenderingModule, "AsyncJobManager")
 
 
 def test_viewport_capture_denies_output_before_scene_mutation(
@@ -911,10 +909,15 @@ def test_viewport_capture_denies_output_before_scene_mutation(
         action="get_viewport_screenshot_base64",
         filepath=str(tmp_path / "outside.png"),
     )
+    MultiBase64Result = RenderingModule.get_viewport_screenshot_base64(
+        action="get_viewport_screenshot_base64",
+        views=["FRONT", "TOP"],
+    )
 
     assert ErrorCode(OutsideResult) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
     assert ErrorCode(MultiResult) == "OUTPUT_FAMILY_DISABLED"
     assert ErrorCode(Base64Result) == "FILESYSTEM_PATH_OUTSIDE_ROOT"
+    assert ErrorCode(MultiBase64Result) == "OUTPUT_FAMILY_DISABLED"
     GetScene.assert_not_called()
 
 

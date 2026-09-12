@@ -40,7 +40,6 @@ from ..core.universal_coercion import TypeCoercer, ParameterNormalizer
 from ..dispatcher import register_handler
 from ..core.enums import RenderAction, RenderEngine, RenderQualityPreset
 from ..core.validation_utils import ValidationUtils
-from ..core.job_manager import AsyncJobManager
 from ..utils.path import get_safe_path
 import os
 
@@ -741,117 +740,9 @@ def _handle_render_animation(**params: Any) -> Dict[str, Any]:
 def _submit_async_render(
     scene: "Scene", params: Dict[str, Any], is_animation: bool = False
 ) -> Dict[str, Any]:
-    """
-    Submit a render job to the background AsyncJobManager.
-    Saves a temporary copy of the current file to ensure state is captured.
-
-    SAFETY: Always passes -o to the subprocess to make the output path explicit.
-    If the scene's current render.filepath is empty or relative (e.g. //), or if
-    no filepath was provided in params, output is redirected to a dedicated temp
-    subdirectory to prevent renders silently writing to unexpected locations
-    (Desktop, Blender install dir, etc.).
-    """
+    """Reject retired background rendering before inspecting scene or request data."""
     del scene, params, is_animation
     return _RenderExecutionDisabled("ASYNC_SUBMIT")
-
-    import tempfile
-
-    # 1. Resolve output path BEFORE saving the temp file.
-    # Priority: explicit param > scene's absolute path > safe temp fallback.
-    raw_output = getattr(scene.render, "filepath", "") or ""
-    explicit_filepath = params.get("filepath")
-
-    # Determine if the current scene path is safe (absolute & user-intended).
-    # Relative paths start with "//" in Blender notation or "./" on disk.
-    _is_safe_abs = (
-        bool(raw_output)
-        and not raw_output.startswith("//")
-        and not raw_output.startswith("./")
-        and os.path.isabs(raw_output)
-    )
-
-    if not _is_safe_abs:
-        # Scene has no explicit absolute path → redirect to a per-job temp subdir
-        # so frames never land in Desktop, Blender install dir, or cwd.
-        timestamp = int(time.time())
-        safe_out_dir = os.path.join(
-            tempfile.gettempdir(), f"blender_render_{timestamp}_{uuid.uuid4().hex[:6]}"
-        )
-        os.makedirs(safe_out_dir, exist_ok=True)
-        # Blender appends #### + extension automatically; base name = "frame_"
-        output_path = os.path.join(safe_out_dir, "frame_")
-        if not explicit_filepath:
-            logger.info(
-                f"_submit_async_render: scene.render.filepath {raw_output!r} is relative/empty — "
-                f"redirecting output to temp dir: {safe_out_dir}"
-            )
-    else:
-        output_path = raw_output
-
-    timestamp = int(time.time())
-
-    # 2. Save temp .blend
-    temp_filename = f"async_render_{timestamp}_{uuid.uuid4().hex[:8]}.blend"
-    temp_path = os.path.join(tempfile.gettempdir(), temp_filename)
-
-    try:
-        bpy.ops.wm.save_as_mainfile(filepath=temp_path, copy=True, compress=True)
-        logger.info(f"Saved temp file for async render: {temp_path}")
-    except Exception as e:
-        return ResponseBuilder.error(
-            handler="manage_rendering",
-            action="ASYNC_SUBMIT",
-            error_code="SAVE_FAILED",
-            message=f"Failed to save temp file for async render: {e}",
-        )
-
-    # 3. Construct Command
-    # Always include -o so the subprocess output is explicit regardless of what
-    # path is embedded in the saved .blend. This prevents "ghost" renders to
-    # previously-set paths (Desktop etc.) when no new filepath is provided.
-    cmd = [bpy.app.binary_path, "-b", temp_path, "-o", output_path]
-
-    if is_animation:
-        cmd.append("-a")
-        job_type = "Animation"
-    else:
-        cmd.extend(["-f", str(scene.frame_current)])
-        job_type = "Frame"
-
-    # 4. Submit Job
-    try:
-        job_name = f"Render {job_type} - {scene.name}"
-        job_id = AsyncJobManager.submit_job(
-            command=cmd,
-            cwd=tempfile.gettempdir(),
-            name=job_name,
-            metadata={
-                "blend_file": temp_path,
-                "scene": scene.name,
-                "output": output_path,
-            },
-        )
-
-        return ResponseBuilder.success(
-            handler="manage_rendering",
-            action="ASYNC_SUBMIT",
-            data={
-                "job_id": job_id,
-                "status": "QUEUED",
-                "message": f"Async render submitted: {job_name}",
-                "output": output_path,
-                "temp_file": temp_path,
-                "tip": "Use manage_jobs action=LIST_JOBS to monitor, CANCEL_JOB to stop.",
-            },
-        )
-
-    except Exception as e:
-        return ResponseBuilder.error(
-            handler="manage_rendering",
-            action="ASYNC_SUBMIT",
-            error_code="SUBMISSION_FAILED",
-            message=f"Failed to submit async job: {e}",
-        )
 
 
 def _create_auto_camera() -> "Object":
@@ -2210,74 +2101,6 @@ def get_viewport_screenshot_base64(**params: Any) -> Dict[str, Any]:
             )
             if frame_result:
                 two_obj_frame = frame_result  # type: ignore[assignment]
-
-        # --- MULTI-VIEW MODE: views=[...] captures multiple angles, returns __mcp_images__ ---
-        if views_list and isinstance(views_list, list):
-            import base64 as _b64mv
-
-            orig_format_mv = getattr(scene.render.image_settings, "file_format", "PNG")
-            scene.render.image_settings.file_format = img_format
-            old_shading_mv = _set_viewport_shading(shading)
-            if frame_scene and not target_object_name and not target_objects_list:
-                _frame_scene_in_viewport(scene)
-            images_list_mv: list = []
-            base_stem = os.path.join(
-                tempfile.gettempdir(),
-                f"mcp_view_mv_{int(time.time())}",
-            )
-            try:
-                for vd in views_list:
-                    vd_upper = str(vd).upper()
-                    if vd_upper not in _VALID_VIEW_DIRECTIONS:
-                        logger.warning(f"views: skipping invalid direction '{vd_upper}'")
-                        continue
-                    vd_path = f"{base_stem}_{vd_upper.lower()}.png"
-                    saved_vd = _apply_view_direction(
-                        scene, vd_upper, target_object_name, view_distance
-                    )
-                    # Re-apply two-object framing center after view_direction resets viewport position
-                    if two_obj_frame and not target_object_name:
-                        _reapply_frame_center(two_obj_frame[0], two_obj_frame[1])
-                    try:
-
-                        def _do_cap_vd(p: str = vd_path) -> bool:
-                            return _do_opengl_capture(scene, p)
-
-                        success_vd = cast(
-                            bool,
-                            execute_on_main_thread(
-                                _do_cap_vd, timeout=RenderTimeout.VIEWPORT_CAPTURE.value
-                            ),
-                        )
-                        if success_vd and os.path.exists(vd_path):
-                            _resize_image_to_max_size(vd_path, max_size)
-                            with open(vd_path, "rb") as _fh:
-                                images_list_mv.append(
-                                    {
-                                        "data": _b64mv.b64encode(_fh.read()).decode("utf-8"),
-                                        "mime": _FORMAT_MIME.get(img_format, "image/png"),
-                                        "label": vd_upper,
-                                    }
-                                )
-                    finally:
-                        if saved_vd:
-                            _restore_view_state(saved_vd)
-            finally:
-                scene.render.image_settings.file_format = orig_format_mv
-                if old_shading_mv is not None:
-                    _set_viewport_shading(old_shading_mv)
-                # Restore animation frame if it was changed
-                if requested_frame is not None:
-                    scene.frame_set(original_frame)
-            return ResponseBuilder.success(
-                handler="get_viewport_screenshot_base64",
-                action="CAPTURE",
-                data={
-                    "views": [img["label"] for img in images_list_mv],
-                    "image_count": len(images_list_mv),
-                    "__mcp_images__": images_list_mv,
-                },
-            )
 
         # --- SINGLE VIEW MODE (original behaviour) ---
 
