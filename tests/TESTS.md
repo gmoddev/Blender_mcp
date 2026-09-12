@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **893** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **906** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **941** |
+| **Grand total collected** | | | **954** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -36,6 +36,16 @@ make test-cov     # Full suite with HTML + XML coverage
 
 ## Unit Test Files (`tests/unit/`)
 
+### `test_provider_import.py` (12 tests)
+
+Transactional GLB import tests cover main-thread admission, exact byte revalidation, elapsed and
+clock failures, native operator failure, result budgets, verified rollback, rollback failure, and
+context restoration sequencing.
+
+```bash
+uv run pytest tests/unit/test_provider_import.py -v
+```
+
 ### `test_provider_content.py` (25 tests)
 
 Provider GLB admission tests cover workspace ownership and exact file sets, links and formats,
@@ -46,7 +56,7 @@ digest revalidation, redacted errors, and bounded native-import result deltas.
 uv run pytest tests/unit/test_provider_content.py -v
 ```
 
-### `test_provider_jobs.py` (20 tests)
+### `test_provider_jobs.py` (21 tests)
 
 Provider lifecycle tests cover bounded admission and retention, exact duplicate reconciliation,
 conflicting request identity, queued/running/prepared cancellation, retry truth, main-thread-only

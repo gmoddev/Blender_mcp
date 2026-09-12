@@ -116,9 +116,10 @@ provider credential entry and non-Windows backend validation remain open. Shared
 HTTPS/DNS/redirect/peer enforcement, bounded downloads, ZIP inspection, bounded extraction, and
 in-process artifact cleanup are implemented but not connected to providers; controlled live-network
 fixtures, startup cleanup reconciliation, provider-specific contracts and job integration,
-native-import rollback, checkpoint recovery, and the remaining logging surface remain open. A
+hard native-import isolation, checkpoint recovery, and the remaining logging surface remain open. A
 shared single-file GLB boundary now enforces workspace/digest identity, bounded container/JSON/
-accessor/image structure, no external resources or extensions, and bounded import-result deltas.
+accessor/image structure, no external resources or extensions, bounded import-result deltas, and
+verified rollback of newly created tracked datablocks after a failed, late, or oversized import.
 Caller-controlled batch-name
 regular expressions are removed in favor of bounded exact, prefix, suffix, and glob selectors.
 These are scan targets, not accepted risks.

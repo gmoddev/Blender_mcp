@@ -97,9 +97,10 @@ the bounded glob replacement, checks latency budgets, and removes every canary o
   --python .\tests\live\validate_provider_content.py
 ```
 
-Creates one request-owned minimal triangle GLB, inspects and digest-binds it without `bpy`, imports
-it through Blender's native glTF operator, validates the bounded result delta, rejects a changed
-artifact, and removes all scene and temporary artifacts. It performs no external network request.
+Creates one request-owned minimal triangle GLB, inspects and digest-binds it without `bpy`, forces a
+real native import through the elapsed-deadline rollback path, verifies exact tracked datablock and
+selection restoration, completes a clean bounded import, rejects a changed artifact, and removes
+all scene and temporary artifacts. It performs no external network request.
 
 ## Installed credential extension
 

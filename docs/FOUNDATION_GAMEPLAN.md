@@ -432,6 +432,27 @@ provider: provider-specific endpoint/response contracts, controlled network fixt
 binding, importer interruption and deterministic rollback, cancellation, startup reconciliation,
 and handler/job integration remain open.
 
+## Twenty-Fourth Implementation Slice: Foundation 0F/0I transactional GLB import
+
+A main-thread-only commit boundary now revalidates the complete digest-bound GLB immediately before
+mutation, captures every glTF-relevant Blender datablock identity plus selection context, and invokes
+the native GLB operator. Success requires a finished operator, a bounded result delta, and completion
+within a local elapsed-time budget.
+
+Native failure, result-limit denial, clock failure, or elapsed deadline triggers dependency-ordered
+removal of every newly created object, collection, action, armature, camera, light, curve, mesh,
+material, node group, and image. The original active object and selection are restored, and exact
+identity equality is required before rollback is reported as complete. Rollback failure has its own
+terminal code, and provider jobs now preserve bounded commit failure codes without exposing exception
+text.
+
+Blender 5.2.1 performs a real triangle import, deterministically forces the post-return deadline
+path, verifies exact rollback, and then completes a clean import. Blender's synchronous in-process
+importer cannot be safely preempted, so this completion deadline does not bound a stuck native call.
+Providers remain quarantined while hard-deadline isolation, provider-specific contracts, controlled
+network fixtures, artifact-root reconciliation, credential/cancellation binding, and end-to-end job
+integration remain open.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

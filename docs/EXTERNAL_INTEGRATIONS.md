@@ -40,8 +40,12 @@ bounded worker preparation, request/digest reconciliation, cooperative cancellat
 main-thread commit admission, worker cleanup, and metadata-only terminal state. It is likewise not
 wired to a provider. A shared single-file GLB boundary now validates workspace ownership, file
 identity, container/JSON structure, external-resource absence, graph/accessor/image budgets, and a
-SHA-256-bound pre-import plan. It also validates bounded post-import count deltas. This does not
-provide importer interruption or rollback and does not replace provider-specific response contracts.
+SHA-256-bound pre-import plan. It also validates bounded post-import count deltas. By itself this
+does not provide native-import rollback and does not replace provider-specific response contracts.
+The main-thread transactional importer now supplies exact tracked-datablock/context rollback for
+native failures, rejected result deltas, and post-return elapsed deadline violations. Blender's
+synchronous importer still cannot be safely interrupted in process, so hard-deadline isolation and
+provider-specific response contracts remain re-enable gates.
 
 The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
 from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed

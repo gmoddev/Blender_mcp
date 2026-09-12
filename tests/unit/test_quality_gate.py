@@ -15,19 +15,23 @@ ExpectedMypyTargets = {
     "blender_mcp/core/network_boundary.py",
     "blender_mcp/core/provider_jobs.py",
     "blender_mcp/core/provider_content.py",
+    "blender_mcp/core/provider_import.py",
     "blender_mcp/core/name_selector.py",
     "blender_mcp/core/credential_store.py",
     "blender_mcp/core/logging_config.py",
     "stdio_bridge.py",
 }
-AllowedDirectBpyTargets = {"blender_mcp/core/logging_config.py"}
+AllowedDirectBpyTargets = {
+    "blender_mcp/core/logging_config.py",
+    "blender_mcp/core/provider_import.py",
+}
 
 
 def test_mypy_scope_covers_the_blender_independent_control_plane() -> None:
     assert set(MypyControlPlaneTargets) == ExpectedMypyTargets
 
 
-def test_mypy_scope_limits_direct_blender_imports_to_logging_metadata() -> None:
+def test_mypy_scope_limits_direct_blender_imports_to_approved_boundaries() -> None:
     for Target in MypyControlPlaneTargets:
         Tree = ast.parse(Path(Target).read_text(encoding="utf-8"))
         for Node in ast.walk(Tree):

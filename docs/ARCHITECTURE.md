@@ -96,7 +96,10 @@ and a future native import. It revalidates workspace containment and file identi
 GLB/JSON structure without `bpy`, rejects external resources and extensions, caps graph, accessor,
 buffer, animation, and embedded-image work, and binds the preparation plan to a SHA-256 digest.
 Its post-import delta checker is evidence for a future commit callback, not rollback or permission
-to enable a provider.
+to enable a provider. `core/provider_import.py` owns the main-thread commit transaction: it captures
+glTF-relevant Blender datablock identities, invokes the native importer, validates elapsed/result
+limits, restores selection context, and removes and verifies every new tracked datablock on failure.
+The provider-job ledger preserves its bounded failure code while retaining no exception text.
 
 ## Migration Risks
 
@@ -147,8 +150,11 @@ to enable a provider.
   cleanup/reconciliation and controlled live-network fixtures remain open. Provider work now has a
   bounded worker-prepare/main-thread-commit lifecycle. Single-file GLB content can now be inspected
   off-thread and revalidated by digest before commit, and Blender 5.2.1 validates a bounded import
-  result delta. Provider-specific contracts, importer rollback, file selection, and handler
-  integration remain open, so this foundation does not make a provider operational.
+  result delta. A main-thread transactional boundary now rolls failed, late, or oversized imports
+  back to exact tracked datablock/context identity. Because the native operator is synchronous, its
+  elapsed deadline is post-return enforcement rather than safe preemption. Provider-specific
+  contracts, hard-deadline isolation, file selection, and handler integration remain open, so this
+  foundation does not make a provider operational.
 
 ## Reference-Repositories Assessment
 

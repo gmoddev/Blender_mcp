@@ -8,6 +8,7 @@ from dataclasses import fields
 import pytest
 
 from blender_mcp.core.provider_jobs import (
+    ProviderCommitError,
     ProviderCommitOutcome,
     ProviderJobError,
     ProviderJobLimits,
@@ -367,6 +368,33 @@ def test_prepare_and_commit_failures_are_redacted_and_cleanup_runs() -> None:
         CommitManager.Shutdown(Wait=True)
 
 
+def test_structured_commit_failure_code_survives_job_boundary() -> None:
+    Manager = ProviderJobManager()
+    try:
+        Job = Manager.Submit(
+            "structured-commit-fail",
+            DigestA,
+            "Import",
+            lambda Token: ProviderPreparedPayload(None, lambda: None),
+            lambda Value: (_ for _ in ()).throw(
+                ProviderCommitError(
+                    "PROVIDER_IMPORT_ROLLED_BACK",
+                    "The provider import was rolled back",
+                )
+            ),
+        )
+        Manager.WaitForSettledPreparation(Job.JobId, 2.0)
+        Manager.RunNextCommit()
+        Failed = Manager.WaitForSettledPreparation(Job.JobId, 2.0)
+
+        assert Failed.Status == ProviderJobStatus.FAILED
+        assert Failed.FailureCode == "PROVIDER_IMPORT_ROLLED_BACK"
+        assert Failed.OutcomeCode is None
+        assert "rolled back" not in repr(Failed)
+    finally:
+        Manager.Shutdown(Wait=True)
+
+
 def test_cleanup_failure_after_commit_preserves_successful_commit_fact() -> None:
     Manager = ProviderJobManager()
     try:
@@ -640,6 +668,8 @@ def test_limits_identity_outcomes_and_wait_deadlines_validate() -> None:
         ProviderCommitOutcome("lowercase")
     with pytest.raises(ValueError):
         ProviderCommitOutcome(1)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        ProviderCommitError("invalid-code", "fixed")
     with pytest.raises(ValueError):
         ProviderPreparedPayload(None, None)  # type: ignore[arg-type]
     with pytest.raises(ValueError):

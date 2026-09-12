@@ -50,6 +50,17 @@ class ProviderJobError(RuntimeError):
         self.RetrySafe = RetrySafe
 
 
+class ProviderCommitError(RuntimeError):
+    """Structured failure raised by a trusted provider commit boundary."""
+
+    def __init__(self, Code: str, PublicMessage: str):
+        if not isinstance(Code, str) or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", Code) is None:
+            raise ValueError("Provider commit failures require a bounded code")
+        super().__init__(PublicMessage)
+        self.Code = Code
+        self.PublicMessage = PublicMessage
+
+
 class ProviderJobCancelled(RuntimeError):
     """Private cooperative-cancellation signal for preparation callbacks."""
 
@@ -319,19 +330,23 @@ class ProviderJobManager:
             Job.Status = ProviderJobStatus.COMMITTING
 
         DesiredStatus = ProviderJobStatus.COMPLETED
+        FailureCode: str | None = None
         try:
             Outcome = Commit(Prepared.Value)
             if not isinstance(Outcome, ProviderCommitOutcome):
                 raise TypeError
+        except ProviderCommitError as Error:
+            Outcome = None
+            DesiredStatus = ProviderJobStatus.FAILED
+            FailureCode = Error.Code
         except Exception:
             Outcome = None
             DesiredStatus = ProviderJobStatus.FAILED
+            FailureCode = "PROVIDER_COMMIT_FAILED"
 
         with self._Condition:
             Job.Outcome = Outcome
-            Job.FailureCode = (
-                "PROVIDER_COMMIT_FAILED" if DesiredStatus == ProviderJobStatus.FAILED else None
-            )
+            Job.FailureCode = FailureCode
             Job.Prepared = None
             Job.Status = ProviderJobStatus.CLEANING
             self._Condition.notify_all()
