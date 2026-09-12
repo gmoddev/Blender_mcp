@@ -25,7 +25,7 @@ In practice: tell your AI *"create a red metallic sphere above the cube"* or *"c
 
 > **Raw Python is a separate high-risk capability.** `execute_blender_code`, text-block execution, and the legacy alias run unrestricted Python with the Blender user's authority. They are denied in Safe Mode and remain denied in Full Structured Mode until **Allow Raw Python** is explicitly enabled.
 
-> **Asset safety status.** Foundation 0 is not complete. The scene/export family uses explicit local read/write roots, and shared network/download/archive plus provider-job helpers are bounded, but providers remain quarantined while their contracts, handler integration, atomic publication, and live cross-platform validation remain open. Continue using disposable `.blend` copies.
+> **Asset safety status.** Foundation 0 is not complete. The scene/export family uses explicit local read/write roots, and shared network/download/archive, provider-job, and single-file GLB content helpers are bounded, but providers remain quarantined while their contracts, importer rollback, handler integration, atomic publication, and live cross-platform validation remain open. Continue using disposable `.blend` copies.
 
 ---
 
@@ -443,8 +443,8 @@ Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock
 integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 868 collected: 867 passed, 1 skipped
-uv run pytest --collect-only -q          # 916 total cases currently collected
+uv run pytest tests/unit -q              # 893 collected: 892 passed, 1 skipped
+uv run pytest --collect-only -q          # 941 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
@@ -455,8 +455,8 @@ uv run python scripts/quality/run_checks.py          # 12 quality checks
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
-| Complete unit suite | 37 files | 868 |
-| **Total** | **37 test files** | **868** |
+| Complete unit suite | 38 files | 893 |
+| **Total** | **38 test files** | **893** |
 
 </details>
 

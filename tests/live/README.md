@@ -90,6 +90,17 @@ the canary and temporary root. It performs no external network request.
 Creates 512 disposable objects, rejects a regex-shaped legacy selector without mutation, exercises
 the bounded glob replacement, checks latency budgets, and removes every canary object before exit.
 
+## Provider GLB content boundary
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_provider_content.py
+```
+
+Creates one request-owned minimal triangle GLB, inspects and digest-binds it without `bpy`, imports
+it through Blender's native glTF operator, validates the bounded result delta, rejects a changed
+artifact, and removes all scene and temporary artifacts. It performs no external network request.
+
 ## Installed credential extension
 
 Build and install the extension into a disposable Blender user resource directory, then run

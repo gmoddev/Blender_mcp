@@ -412,6 +412,26 @@ regex-shaped input without mutation, and completes the bounded glob path within 
 acceptance budget. Foundation 0I still requires provider-specific response/content and native-import
 bounds, while other Foundation 0 workstreams remain independently open.
 
+## Twenty-Third Implementation Slice: Foundation 0F/0I provider GLB content admission
+
+A Blender-independent provider-content boundary now accepts exactly one workspace-owned binary
+glTF file and rejects additional files, links, containment failures, unsupported container/version
+structure, malformed or over-complex JSON, external resources, glTF extensions, sparse or
+out-of-range accessors, and unsupported embedded images before native import. Explicit budgets cap
+artifact/JSON bytes, graph collections, buffer views, accessors/elements, primitives, animations,
+skins, and embedded image bytes/dimensions/pixels.
+
+Successful preparation produces a canonical, SHA-256-bound plan. The complete inspection repeats
+before a future commit so workspace replacement or byte changes fail closed. A typed result checker
+bounds post-import Blender object, mesh, material, image, armature, vertex, and polygon deltas and
+rejects an empty or decreasing result.
+
+Blender 5.2.1 imports a minimal inspected triangle GLB in a disposable factory session, validates
+the expected result delta, and rejects a changed artifact. This slice does not wire or enable a
+provider: provider-specific endpoint/response contracts, controlled network fixtures, credential
+binding, importer interruption and deterministic rollback, cancellation, startup reconciliation,
+and handler/job integration remain open.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

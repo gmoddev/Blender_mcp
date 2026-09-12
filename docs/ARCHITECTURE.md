@@ -91,6 +91,12 @@ metadata-only retained ledger. It is not connected to the quarantined handlers.
 `core/name_selector.py` owns the only caller-controlled batch-name matching grammar: bounded
 case-sensitive exact, prefix, suffix, and iterative `*`/`?` glob matching. Both batch handlers deny
 their legacy regex fields before scene access and use this shared boundary.
+`core/provider_content.py` owns conservative single-file GLB admission between a request workspace
+and a future native import. It revalidates workspace containment and file identity, parses bounded
+GLB/JSON structure without `bpy`, rejects external resources and extensions, caps graph, accessor,
+buffer, animation, and embedded-image work, and binds the preparation plan to a SHA-256 digest.
+Its post-import delta checker is evidence for a future commit callback, not rollback or permission
+to enable a provider.
 
 ## Migration Risks
 
@@ -139,8 +145,10 @@ their legacy regex fields before scene access and use this shared boundary.
   cleanup. Purpose-scoped HTTPS downloads now reauthorize redirects, bind DNS to the connected peer,
   verify TLS, enforce deadlines and response budgets, and clean partial request workspaces. Startup
   cleanup/reconciliation and controlled live-network fixtures remain open. Provider work now has a
-  bounded worker-prepare/main-thread-commit lifecycle, but provider-specific file selection and
-  handler integration remain open, so this foundation does not make a provider operational.
+  bounded worker-prepare/main-thread-commit lifecycle. Single-file GLB content can now be inspected
+  off-thread and revalidated by digest before commit, and Blender 5.2.1 validates a bounded import
+  result delta. Provider-specific contracts, importer rollback, file selection, and handler
+  integration remain open, so this foundation does not make a provider operational.
 
 ## Reference-Repositories Assessment
 

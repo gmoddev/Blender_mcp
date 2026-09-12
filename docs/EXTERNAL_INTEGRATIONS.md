@@ -38,7 +38,10 @@ provider-specific endpoint/content contract, credential binding, and handler int
 required before external data can reach Blender. The shared provider-job lifecycle now supplies
 bounded worker preparation, request/digest reconciliation, cooperative cancellation, serialized
 main-thread commit admission, worker cleanup, and metadata-only terminal state. It is likewise not
-wired to a provider and does not replace provider-specific content or native-import validation.
+wired to a provider. A shared single-file GLB boundary now validates workspace ownership, file
+identity, container/JSON structure, external-resource absence, graph/accessor/image budgets, and a
+SHA-256-bound pre-import plan. It also validates bounded post-import count deltas. This does not
+provide importer interruption or rollback and does not replace provider-specific response contracts.
 
 The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
 from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed
