@@ -22,6 +22,14 @@ class Colors:
 
 
 RUNNER_PYTHON = "python"
+MypyControlPlaneTargets = (
+    "blender_mcp/core/protocol.py",
+    "blender_mcp/core/session.py",
+    "blender_mcp/core/security.py",
+    "blender_mcp/core/filesystem_boundary.py",
+    "blender_mcp/core/logging_config.py",
+    "stdio_bridge.py",
+)
 
 
 def _ruff_base_cmd() -> List[str]:
@@ -36,6 +44,11 @@ def _mypy_base_cmd() -> List[str]:
     if shutil.which("mypy"):
         return ["mypy"]
     return [sys.executable, "-m", "mypy"]
+
+
+def BuildMypyControlPlaneCommand() -> List[str]:
+    """Build the strict type-check command for selected trust-boundary code."""
+    return [*_mypy_base_cmd(), "--follow-imports=skip", *MypyControlPlaneTargets]
 
 
 def _pyright_base_cmd() -> List[str]:
@@ -178,8 +191,8 @@ def main():
     if not args.fast:
         # 7. MyPy Type Checking
         code, _ = run_command(
-            [*_mypy_base_cmd(), "."],
-            "MyPy Type Checking",
+            BuildMypyControlPlaneCommand(),
+            "Control-Plane MyPy Type Checking",
         )
         results.append(("mypy", code))
 

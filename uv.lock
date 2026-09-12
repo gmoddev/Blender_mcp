@@ -123,7 +123,7 @@ requires-dist = [
     { name = "fake-bpy-module-5-0", marker = "extra == 'dev'" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.19.1" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.5.1" },
     { name = "pydantic", specifier = ">=2.12.5" },

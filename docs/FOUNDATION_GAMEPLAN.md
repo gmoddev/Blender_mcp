@@ -293,9 +293,20 @@ adapters as permitted `utils`-to-`core` delegates. Focused tests prove ordinary 
 cannot import `core`, and the adapters still cannot import handlers. This preserves existing public
 imports without weakening the general dependency rule.
 
-The fast eight-check quality gate and repository-wide Ruff format check pass. The stricter
-twelve-check gate is now 11/12; inherited Blender-stub mypy failures remain separate typed-baseline
-work and are not treated as evidence that this containment slice failed.
+At completion of this slice, the fast eight-check quality gate and repository-wide Ruff format
+check passed. The stricter twelve-check gate was 11/12 pending the typed-baseline work below.
+
+## Sixteenth Implementation Slice: Foundation 0 typed control-plane gate
+
+The strict mypy gate now checks selected trust-boundary modules directly: framing, session
+authentication, authorization policy, filesystem authority, metadata-only logging, and the stdio
+bridge. Imported Blender-bound implementation modules are skipped so incomplete third-party `bpy`
+stubs cannot turn the control-plane gate into hundreds of unrelated API-shape errors. Tests pin the
+exact scope, limit direct `bpy` use to logging's guarded version metadata, and verify the checker
+does not follow Blender-bound imports. Mypy is pinned to the lockfile's validated 1.19.1 baseline.
+
+This makes all twelve quality checks actionable and green without claiming whole-repository static
+typing. Expanding the typed surface remains incremental work and must not use blanket error ignores.
 
 ### Milestone 0: Baseline and scan readiness
 

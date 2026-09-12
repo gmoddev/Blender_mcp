@@ -6,9 +6,9 @@
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **732** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **735** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **780** |
+| **Grand total collected** | | | **783** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -302,6 +302,15 @@ uv run pytest tests/unit/test_import_architecture.py -v
 
 ---
 
+### `test_quality_gate.py` (3 tests)
+Pinned trust-boundary mypy scope and command construction for the strict quality gate.
+
+```bash
+uv run pytest tests/unit/test_quality_gate.py -v
+```
+
+---
+
 ## Integration Tests (`tests/integration/`)
 
 | Mode | Requires | Files |
@@ -351,10 +360,11 @@ uv run pytest tests/integration/test_incident_replay_p11.py -v
 | `test_scene_graph_geo_center.py` | 5 | Geometry center computation |
 | `test_metarig_bounds.py` | 3 | Combined metarig center and height computation |
 | `test_import_architecture.py` | 3 | Import-layer policy and compatibility adapters |
+| `test_quality_gate.py` | 3 | Strict control-plane typing scope |
 | `test_logging_privacy.py` | 3 | Metadata-only logging |
-| **Unit total** | **732** | 731 passed, 1 skipped in the documented baseline run |
+| **Unit total** | **735** | 734 passed, 1 skipped in the documented baseline run |
 | Integration files | 48 | 24 mock plus 24 live Blender cases |
-| **Grand total collected** | **780** | 755 passed, 25 skipped in the documented full run |
+| **Grand total collected** | **783** | 758 passed, 25 skipped in the documented full run |
 
 ---
 

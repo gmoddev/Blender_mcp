@@ -26,7 +26,7 @@ dev = [
     "pytest-xdist>=3.0",      # Parallel test execution
     "black>=26.1.0",
     "ruff>=0.15.0",
-    "mypy>=1.19.1",
+    "mypy==1.19.1",           # Reproducible control-plane typing baseline
     "pyright>=1.1.408",       # Microsoft's stricter type checker
     "import-linter>=2.0",     # Architecture enforcement
     "pip-audit>=2.0",         # Security vulnerability scanner
