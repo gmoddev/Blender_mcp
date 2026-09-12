@@ -40,6 +40,19 @@ approved GLB export, denied sequencer import without editor mutation, approved s
 import, and a Windows junction escape when junction creation is available, then removes the
 temporary directory.
 
+## Archive boundary
+
+Run the ZIP and temporary-artifact checks in Blender's embedded Python runtime:
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_archive_boundary.py
+```
+
+The script creates a unique OS-temporary test root, extracts a bounded archive into an opaque
+request workspace, verifies context cleanup, denies traversal before workspace creation, checks
+that no outside file appeared, and removes the test root.
+
 ## Installed credential extension
 
 Build and install the extension into a disposable Blender user resource directory, then run

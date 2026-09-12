@@ -337,6 +337,23 @@ a saved `.blend` byte scan without the canary. The sandbox logon session was den
 the approved user context passed, providing negative evidence that the credential backend is bound
 to a real Windows logon context. No production credential service or account was accessed.
 
+## Nineteenth Implementation Slice: Foundation 0F/0I archive and artifact boundary
+
+The shared archive boundary now inspects an entire ZIP member inventory before creating output.
+It rejects unsafe paths, cross-platform name collisions, file/directory conflicts, links, special
+files, encryption, unsupported compression, and archives exceeding compressed, expanded, member,
+count, ratio, depth, or path-length budgets. Extraction streams each member into a new opaque child
+of an explicit local artifact root, rechecks actual byte counts, never overwrites, and does not
+preserve archive-controlled permissions.
+
+Temporary workspaces retain the initiating request identity in memory and have deterministic
+explicit/context cleanup. Any extraction failure removes partial output, while inspection failures
+create nothing. This slice deliberately leaves every provider quarantined: the artifact-root startup
+policy, purpose-scoped HTTP client, DNS/redirect/connected-peer enforcement, bounded downloads,
+provider content selection, and off-main-thread provider-job lifecycle remain open.
+Blender 5.2.1 embedded-Python validation passes a bounded extraction and cleanup plus traversal
+denial without outside output or residual artifacts.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

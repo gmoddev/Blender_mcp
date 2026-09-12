@@ -7,6 +7,7 @@ from scripts.quality.run_checks import BuildMypyControlPlaneCommand, MypyControl
 
 
 ExpectedMypyTargets = {
+    "blender_mcp/core/archive_boundary.py",
     "blender_mcp/core/protocol.py",
     "blender_mcp/core/session.py",
     "blender_mcp/core/security.py",

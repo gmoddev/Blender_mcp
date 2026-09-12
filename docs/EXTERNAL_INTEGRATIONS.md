@@ -28,6 +28,12 @@ but cannot revoke a callback or function reference that old code already capture
 - Explicit authorization and size/type validation before any local file leaves the machine.
 - OS/user-scoped provider credentials; no secrets in Scene or temporary `.blend` copies.
 
+The shared ZIP boundary now supplies preflight member/path/type/collision checks, compressed and
+expanded resource budgets, bounded streaming extraction, opaque request-owned workspaces, and
+cleanup on success or failure. It is not wired to any provider. A configured artifact-root policy,
+safe HTTP/download layer, provider-specific content contract, and provider job lifecycle are still
+required before it can receive external data.
+
 The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
 from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed
 only through an explicit confirmed action; untrusted Scene values are never imported into the OS

@@ -78,6 +78,11 @@ control and provider slots in an allowlisted OS keyring backend; the bridge and 
 control slot. Protocol v2 binds a bridge-instance namespace and session identity into mutual-HMAC
 authentication; it does not claim per-frame cryptographic integrity.
 
+`core/archive_boundary.py` owns provider ZIP inspection, bounded streaming extraction, and opaque
+request-owned artifact workspaces. It is Blender-independent and must run off the main thread.
+Providers remain quarantined until a separate purpose-scoped network client and provider-job
+lifecycle feed this boundary without accepting caller-selected URLs or implicit artifact roots.
+
 ## Migration Risks
 
 - Protocol v2 intentionally rejects v1 and legacy unversioned clients; add-on and bridge must be
@@ -121,6 +126,10 @@ authentication; it does not claim per-frame cryptographic integrity.
 - Every provider module exposes only truthful read-only status until shared network, credential,
   download, content-validation, temporary-artifact, and provider-job services exist. External
   actions carry their real capability metadata and are denied at dispatcher and direct boundaries.
+- ZIP artifacts now have a shared preflight and extraction boundary with deterministic in-process
+  cleanup. Startup cleanup/reconciliation, safe downloading, provider-specific file selection, and
+  integration into off-main-thread jobs remain open, so this foundation does not make a provider
+  operational.
 
 ## Reference-Repositories Assessment
 

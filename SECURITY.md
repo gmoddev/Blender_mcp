@@ -112,9 +112,10 @@ can be enumerated, authorized, bounded, and reconciled. Texture bakes remain ava
 but caller-selected external output paths are rejected before scene access. Hunyuan, Hyper3D,
 Sketchfab, and Poly Haven external actions are quarantined; only truthful read-only status remains.
 Windows x64 credential storage is OS-backed and self-contained in the extension, while secure
-provider credential entry and non-Windows backend validation remain open. Other known gaps remain
-in shared download/archive implementation, selector complexity, checkpoint recovery, and the
-remaining logging surface.
+provider credential entry and non-Windows backend validation remain open. Shared ZIP inspection,
+bounded extraction, and in-process artifact cleanup are implemented but not connected to providers;
+safe network/download handling, startup cleanup reconciliation, provider jobs, selector complexity,
+checkpoint recovery, and the remaining logging surface remain open.
 These are scan targets, not accepted risks.
 
 Until Foundation 0 is complete and live-validated, agent-driven mutations

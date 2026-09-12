@@ -23,6 +23,7 @@ means the invariant is required but not yet proven by the current implementation
 | PRIV-002 | No telemetry leaves the process and telemetry is not enabled or implied by default. | Static scan and network-isolation test. | Target |
 | SUPPLY-001 | Runtime code never silently replaces itself from a remote branch. Updates are explicit and artifacts are pinned. | Static scan and release tests. | Target |
 | INPUT-001 | Untrusted lengths, paths, URLs, schemas, and imported asset metadata are bounded and validated before use. | Boundary and traversal tests. | Partial |
+| ARCHIVE-001 | An untrusted archive is fully inventoried and budgeted before output creation; extraction cannot escape, overwrite, create links/special files, or retain partial output after failure. | Traversal, collision, type, encryption, compression, byte/count/ratio/path-limit, streamed-size, and cleanup tests. | Enforced in the shared ZIP helper; providers remain quarantined until their complete download and job paths use it |
 | EXT-001 | External provider actions cannot perform file, network, archive, timer, credential, temporary-artifact, or Blender mutation work until their dedicated capability foundations exist. | Dispatcher-denial, direct-call, sink-removal, reload-residue, prohibited-I/O, bypass-input, and Blender-live tests. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven after Blender restart; provider functionality intentionally unavailable |
 | EXT-002 | External-integration status distinguishes saved configuration from operational availability, performs no external I/O, and does not read provider credentials. | Safe Mode status, credential-read canary, and truthful-field assertions. | Enforced for Hunyuan, Hyper3D, Sketchfab, and Poly Haven |
 | FS-001 | A migrated file action reaches a Blender/file sink only with a canonical regular-file path contained beneath the matching user-approved read or write root. | Traversal, sibling-prefix, link, Windows ambiguity, final-extension, direct-caller, and legitimate-path tests. | Partial: primary paths and GLB file-backed images pass Windows coverage; remaining file surfaces are not fully inventoried |
@@ -73,6 +74,9 @@ means the invariant is required but not yet proven by the current implementation
 - Hyper3D, Sketchfab, and Poly Haven now match Hunyuan quarantine: `STATUS` is read-only and truthful;
   every external action declares its real dedicated capabilities and fails before retired network,
   local-file, download, temporary-artifact, credential, or Blender-import sinks.
+- The shared ZIP helper rejects unbounded or ambiguous member inventories before output creation and
+  removes request-owned partial workspaces on extraction failure. No provider uses it yet; safe
+  network/download and provider-job paths remain prerequisites for re-enablement.
 - Combined metarig bounds use world-space extrema rather than a fixed corner divisor; focused unit
   tests cover single meshes, separated multi-mesh targets, and empty input.
 - Package metadata and `LICENSE` agree on MIT; the complete copied/adapted-source provenance and

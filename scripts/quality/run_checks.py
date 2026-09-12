@@ -23,6 +23,7 @@ class Colors:
 
 RUNNER_PYTHON = "python"
 MypyControlPlaneTargets = (
+    "blender_mcp/core/archive_boundary.py",
     "blender_mcp/core/protocol.py",
     "blender_mcp/core/session.py",
     "blender_mcp/core/security.py",
