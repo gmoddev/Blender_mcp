@@ -80,6 +80,16 @@ The script prepares a temporary artifact on a provider worker, commits one canar
 Blender's main thread, removes the artifact on a worker, verifies the terminal result, and removes
 the canary and temporary root. It performs no external network request.
 
+## Bounded name-selector harness
+
+```powershell
+& 'C:\Path\To\blender.exe' --background --factory-startup --python-exit-code 1 `
+  --python .\tests\live\validate_name_selectors.py
+```
+
+Creates 512 disposable objects, rejects a regex-shaped legacy selector without mutation, exercises
+the bounded glob replacement, checks latency budgets, and removes every canary object before exit.
+
 ## Installed credential extension
 
 Build and install the extension into a disposable Blender user resource directory, then run

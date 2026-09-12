@@ -13,7 +13,6 @@ High Mode Philosophy: Maximum power, maximum safety.
 from ..core.execution_engine import safe_ops
 
 from typing import Dict, List, Any
-import re
 
 try:
     import bpy
@@ -30,9 +29,24 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.name_selector import (
+    NameSelectorError,
+    ParseNameSelector,
+    ValidateCandidateName,
+    ValidateSelectorBudget,
+)
 from ..core.validation_utils import ValidationUtils
 
 logger = get_logger()
+
+
+def _NameSelectorFailure(Action: str | None, Error: NameSelectorError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_batch",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
 
 
 @register_handler(
@@ -46,8 +60,8 @@ logger = get_logger()
         "description": (
             "STANDARD — Process multiple objects simultaneously: batch rename, duplicate, "
             "set material, add modifier, set visibility, apply transforms.\n\n"
-            "Use selection list or regex pattern to target objects. Much faster than "
-            "looping individual manage_objects calls.\n"
+            "Use a bounded selection list or exact/prefix/suffix/glob selector to target objects. "
+            "Much faster than looping individual manage_objects calls.\n"
             "ACTIONS: RENAME, DUPLICATE, SET_MATERIAL, ADD_MODIFIER, REMOVE_MODIFIER, "
             "SET_VISIBILITY, APPLY_TRANSFORMS, DELETE"
         ),
@@ -55,10 +69,23 @@ logger = get_logger()
             "action": ValidationUtils.generate_enum_schema(BatchAction, "Batch operation"),
             "selection": {
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {"type": "string", "maxLength": 256},
+                "maxItems": 4096,
                 "description": "List of object names to process (empty = all selected)",
             },
-            "pattern": {"type": "string", "description": "Regex pattern for name matching"},
+            "selector": {
+                "type": "object",
+                "description": "Bounded object-name selector; regular expressions are not accepted",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["EXACT", "PREFIX", "SUFFIX", "GLOB"],
+                    },
+                    "value": {"type": "string", "minLength": 1, "maxLength": 128},
+                },
+                "required": ["mode", "value"],
+                "additionalProperties": False,
+            },
             "name_prefix": {"type": "string", "description": "Prefix for rename operation"},
             "name_suffix": {"type": "string", "description": "Suffix for rename operation"},
             "duplicate_count": {
@@ -95,17 +122,57 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
     Batch process multiple objects for efficient workflows.
     """
 
-    # Get target objects
-    if params.get("selection"):
-        targets = [bpy.data.objects.get(name) for name in params["selection"]]
-        targets = [o for o in targets if o is not None]
-    elif params.get("pattern"):
-        pattern = re.compile(params["pattern"])
-        targets = [o for o in bpy.data.objects if pattern.search(o.name)]
-    else:
-        targets = list(bpy.context.selected_objects)
+    if "pattern" in params:
+        return _NameSelectorFailure(
+            action,
+            NameSelectorError(
+                "REGEX_SELECTOR_DISABLED",
+                "Regular-expression selectors are disabled; use selector mode EXACT, PREFIX, SUFFIX, or GLOB",
+            ),
+        )
 
-    if not targets:
+    RawSelection = params.get("selection")
+    RawSelector = params.get("selector")
+    if RawSelection is not None and not isinstance(RawSelection, (list, tuple)):
+        return _NameSelectorFailure(
+            action,
+            NameSelectorError("NAME_SELECTION_INVALID", "The explicit object selection is invalid"),
+        )
+    if RawSelection and RawSelector is not None:
+        return _NameSelectorFailure(
+            action,
+            NameSelectorError(
+                "NAME_SELECTOR_CONFLICT",
+                "Use either an explicit selection or a name selector, not both",
+            ),
+        )
+    if action == BatchAction.SELECT_BY_NAME.value and RawSelector is None:
+        return ResponseBuilder.error(
+            handler="manage_batch",
+            action=action,
+            error_code="MISSING_PARAMETER",
+            message="selector is required",
+        )
+
+    try:
+        Selector = ParseNameSelector(RawSelector) if RawSelector is not None else None
+        if RawSelection:
+            ValidateSelectorBudget(len(RawSelection))
+            for Name in RawSelection:
+                ValidateCandidateName(Name)
+            Targets = [bpy.data.objects.get(Name) for Name in RawSelection]
+            Targets = [Object for Object in Targets if Object is not None]
+        elif Selector is not None:
+            ValidateSelectorBudget(len(bpy.data.objects))
+            AllObjects = list(bpy.data.objects)
+            Targets = [Object for Object in AllObjects if Selector.Matches(Object.name)]
+        else:
+            Targets = list(bpy.context.selected_objects)
+            ValidateSelectorBudget(len(Targets))
+    except NameSelectorError as Error:
+        return _NameSelectorFailure(action, Error)
+
+    if not Targets:
         return ResponseBuilder.error(
             handler="manage_batch",
             action=action,
@@ -128,7 +195,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
         prefix = params.get("name_prefix", "")
         suffix = params.get("name_suffix", "")
 
-        for i, obj in enumerate(targets):
+        for i, obj in enumerate(Targets):
             old_name = obj.name
             new_name = f"{prefix}{obj.name}{suffix}"
 
@@ -150,7 +217,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 2. DELETE
     elif action == BatchAction.DELETE.value:
-        for obj in targets:
+        for obj in Targets:
             try:
                 name = obj.name
                 bpy.data.objects.remove(obj, do_unlink=True)
@@ -178,7 +245,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
         if not isinstance(offset, (list, tuple)) or len(offset) < 3:
             offset = [1.0, 0.0, 0.0]
 
-        for obj in targets:
+        for obj in Targets:
             for i in range(count):
                 try:
                     # Create duplicate
@@ -239,7 +306,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
     elif action == BatchAction.APPLY_MODIFIERS.value:
         modifier_type = params.get("modifier_type")
 
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 results["skipped"].append({"object": obj.name, "reason": "Not a mesh"})
                 continue
@@ -275,7 +342,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
     elif action == BatchAction.REMOVE_MODIFIERS.value:
         modifier_type = params.get("modifier_type")
 
-        for obj in targets:
+        for obj in Targets:
             removed = []
             for mod in list(obj.modifiers):
                 if modifier_type and mod.type != modifier_type:
@@ -303,7 +370,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
                 message="modifier_type is required",
             )
 
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 continue
 
@@ -347,7 +414,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
         slot_index = params.get("slot_index", 0)
         clear_existing = params.get("clear_existing", False)
 
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 results["skipped"].append({"object": obj.name, "reason": "Not a mesh"})
                 continue
@@ -372,7 +439,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 7. CLEAR_MATERIALS
     elif action == BatchAction.CLEAR_MATERIALS.value:
-        for obj in targets:
+        for obj in Targets:
             obj.data.materials.clear()  # type: ignore
             results["processed"].append(obj.name)
 
@@ -387,7 +454,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
         angle_limit = params.get("angle_limit", 66.0)
         island_margin = params.get("island_margin", 0.02)
 
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 continue
 
@@ -414,7 +481,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 9. TRIANGULATE
     elif action == BatchAction.TRIANGULATE.value:
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 continue
 
@@ -444,7 +511,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
     elif action == BatchAction.DECIMATE.value:
         ratio = params.get("decimate_ratio", 0.5)
 
-        for obj in targets:
+        for obj in Targets:
             if obj.type != "MESH":
                 continue
 
@@ -468,7 +535,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 11. ORIGIN_TO_GEOMETRY
     elif action == BatchAction.ORIGIN_TO_GEOMETRY.value:
-        for obj in targets:
+        for obj in Targets:
             bpy.context.view_layer.objects.active = obj
             try:
                 with ContextManagerV3.temp_override(
@@ -487,7 +554,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 12. APPLY_SCALE
     elif action == BatchAction.APPLY_SCALE.value:
-        for obj in targets:
+        for obj in Targets:
             bpy.context.view_layer.objects.active = obj
             try:
                 with ContextManagerV3.temp_override(
@@ -506,7 +573,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 13. MAKE_INSTANCES_REAL
     elif action == BatchAction.MAKE_INSTANCES_REAL.value:
-        for obj in targets:
+        for obj in Targets:
             if not obj.instance_type == "COLLECTION":
                 results["skipped"].append(
                     {"object": obj.name, "reason": "Not a collection instance"}
@@ -531,7 +598,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 14. JOIN_MESHES
     elif action == BatchAction.JOIN_MESHES.value:
-        mesh_objects = [o for o in targets if o.type == "MESH"]
+        mesh_objects = [o for o in Targets if o.type == "MESH"]
 
         if len(mesh_objects) < 2:
             return ResponseBuilder.error(
@@ -580,7 +647,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
             bpy.context.collection.objects.link(empty)
             empty.empty_display_size = 2
 
-        for obj in targets:
+        for obj in Targets:
             if obj == empty:
                 continue
             obj.parent = empty
@@ -596,7 +663,7 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
     elif action == BatchAction.SET_VISIBILITY.value:
         visibility = params.get("visibility", True)
 
-        for obj in targets:
+        for obj in Targets:
             obj.hide_viewport = not visibility
             obj.hide_render = not visibility
             results["processed"].append(obj.name)
@@ -609,29 +676,18 @@ def manage_batch(action: str | None = None, **params: Any) -> dict[str, Any]:
 
     # 17. SELECT_BY_NAME
     elif action == BatchAction.SELECT_BY_NAME.value:
-        pattern_str = params.get("pattern")
-        if not pattern_str:
-            return ResponseBuilder.error(
-                handler="manage_batch",
-                action="SELECT_BY_NAME",
-                error_code="MISSING_PARAMETER",
-                message="pattern is required",
-            )
-
-        regex = re.compile(str(pattern_str))
         matched = []
 
         ContextManagerV3.deselect_all_objects()
 
-        for obj in bpy.data.objects:
-            if regex.search(obj.name):
-                # Isolate visibility to active View Layer
-                if not obj.hide_get() and getattr(obj, "visible_get", lambda: True)():
-                    try:
-                        obj.select_set(True)
-                        matched.append(obj.name)
-                    except RuntimeError as e:
-                        logger.warning(f"Batch select_set failed on {obj.name}: {e}")
+        for obj in Targets:
+            # Isolate visibility to active View Layer
+            if not obj.hide_get() and getattr(obj, "visible_get", lambda: True)():
+                try:
+                    obj.select_set(True)
+                    matched.append(obj.name)
+                except RuntimeError:
+                    logger.warning("[BlenderMCP:Batch] Object selection failed")
 
         return ResponseBuilder.success(
             handler="manage_batch",

@@ -59,7 +59,8 @@ The retained scan reports 11 findings. The first slice directly addresses unauth
 unbounded framing/clients, cosmetic request identity, blind bridge replay, raw-message logging, and
 the Safe Mode raw-code bypass. It does not yet fix the unsafe main-thread timeout state machine,
 filesystem roots, Hunyuan local-file/SSRF paths, bounded downloads/archives, provider credential
-serialization, or regex selectors.
+serialization. Caller-controlled batch-name regex execution is now removed and replaced by a
+bounded regex-free selector boundary.
 
 ## First-Slice Architecture
 
@@ -87,6 +88,9 @@ provider contracts feed both boundaries without accepting caller-selected URLs, 
 or implicit artifact roots. `core/provider_jobs.py` owns bounded worker preparation, request/digest
 reconciliation, cancellation, serialized main-thread commit admission, worker cleanup, and a
 metadata-only retained ledger. It is not connected to the quarantined handlers.
+`core/name_selector.py` owns the only caller-controlled batch-name matching grammar: bounded
+case-sensitive exact, prefix, suffix, and iterative `*`/`?` glob matching. Both batch handlers deny
+their legacy regex fields before scene access and use this shared boundary.
 
 ## Migration Risks
 

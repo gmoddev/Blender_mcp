@@ -443,20 +443,20 @@ Unit tests run without Blender — `bpy` is mocked with `unittest.mock.MagicMock
 integration suite must use a disposable Blender profile and disposable assets.
 
 ```bash
-uv run pytest tests/unit -q              # 847 collected: 846 passed, 1 skipped
-uv run pytest --collect-only -q          # 895 total cases currently collected
+uv run pytest tests/unit -q              # 868 collected: 867 passed, 1 skipped
+uv run pytest --collect-only -q          # 916 total cases currently collected
 uv run pytest tests -v --cov=blender_mcp # With coverage report
 uv run python scripts/quality/run_checks.py --fast   # 8 quality checks
 uv run python scripts/quality/run_checks.py          # 12 quality checks
 ```
 
 <details>
-<summary>Coverage map — 36 unit test files</summary>
+<summary>Coverage map — 37 unit test files</summary>
 
 | Module | Test File | Tests |
 |--------|-----------|-------|
-| Complete unit suite | 36 files | 847 |
-| **Total** | **36 test files** | **847** |
+| Complete unit suite | 37 files | 868 |
+| **Total** | **37 test files** | **868** |
 
 </details>
 

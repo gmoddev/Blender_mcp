@@ -30,6 +30,7 @@ MypyControlPlaneTargets = (
     "blender_mcp/core/filesystem_boundary.py",
     "blender_mcp/core/network_boundary.py",
     "blender_mcp/core/provider_jobs.py",
+    "blender_mcp/core/name_selector.py",
     "blender_mcp/core/credential_store.py",
     "blender_mcp/core/logging_config.py",
     "stdio_bridge.py",

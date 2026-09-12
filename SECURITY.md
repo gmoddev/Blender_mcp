@@ -115,8 +115,9 @@ Windows x64 credential storage is OS-backed and self-contained in the extension,
 provider credential entry and non-Windows backend validation remain open. Shared purpose-scoped
 HTTPS/DNS/redirect/peer enforcement, bounded downloads, ZIP inspection, bounded extraction, and
 in-process artifact cleanup are implemented but not connected to providers; controlled live-network
-fixtures, startup cleanup reconciliation, provider-specific content and job integration, selector
-complexity, checkpoint recovery, and the remaining logging surface remain open.
+fixtures, startup cleanup reconciliation, provider-specific content and job integration,
+checkpoint recovery, and the remaining logging surface remain open. Caller-controlled batch-name
+regular expressions are removed in favor of bounded exact, prefix, suffix, and glob selectors.
 These are scan targets, not accepted risks.
 
 Until Foundation 0 is complete and live-validated, agent-driven mutations

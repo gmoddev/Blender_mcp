@@ -393,6 +393,25 @@ main-thread-only canary mutation in a disposable factory session. Providers rema
 Provider contracts, real network fixtures, artifact-root startup/crash reconciliation, credential
 binding, provider content selection, native-import result checks, and integration are still open.
 
+## Twenty-Second Implementation Slice: Foundation 0I bounded name selectors
+
+Caller-controlled Python regular expressions are removed from generic batch targeting,
+`SELECT_BY_NAME`, advanced pipeline select steps, and advanced object filters. Legacy `pattern` and
+`name_pattern` fields fail with a fixed structured error before scene access or mutation. All four
+paths use one Blender-independent exact, prefix, suffix, and glob matcher; its glob grammar supports
+only `*` and `?` and never invokes Python's regex engine.
+
+The boundary caps selector length, wildcard count, candidate count, candidate-name length,
+selectors per request, total evaluations, and per-candidate matching steps. Advanced pipelines
+preflight every select step and precompute matches before earlier steps can mutate Blender. Unit
+tests cover every mode, negative grammar/budget cases, all legacy entry points, preflight ordering,
+and static regex-removal assertions.
+
+A Blender 5.2.1 factory-session harness creates 512 disposable objects, rejects a catastrophic
+regex-shaped input without mutation, and completes the bounded glob path within the one-second
+acceptance budget. Foundation 0I still requires provider-specific response/content and native-import
+bounds, while other Foundation 0 workstreams remain independently open.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

@@ -13,7 +13,6 @@ High Mode Philosophy: Maximum power, maximum safety.
 from typing import List, Dict, Any
 import os
 from ..core.execution_engine import safe_ops
-import re
 
 try:
     import bpy
@@ -31,12 +30,27 @@ from ..core.thread_safety import ensure_main_thread
 from ..core.context_manager_v3 import ContextManagerV3
 from ..core.response_builder import ResponseBuilder
 from ..core.logging_config import get_logger
+from ..core.name_selector import (
+    NameSelector,
+    NameSelectorError,
+    ParseNameSelector,
+    ValidateSelectorBudget,
+)
 from ..core.security import Capability
 from ..core.validation_utils import ValidationUtils
 from ..core.export_pipeline import AuthorizeExternalImageInputs
 from ..utils.path import get_safe_path
 
 logger = get_logger()
+
+
+def _NameSelectorFailure(Action: str, Error: NameSelectorError) -> dict[str, Any]:
+    return ResponseBuilder.error(
+        handler="manage_advanced_batch",
+        action=Action,
+        error_code=Error.Code,
+        message=Error.PublicMessage,
+    )
 
 
 AdvancedBatchCapabilities = {
@@ -62,9 +76,20 @@ AdvancedBatchCapabilities[AdvancedBatchAction.EXPORT_BATCH_VARIANTS.value] = [
                 AdvancedBatchAction, "Advanced batch action"
             ),
             "objects": {"type": "array", "items": {"type": "string"}},
-            "pipeline": {"type": "object", "description": "Pipeline definition"},
+            "pipeline": {
+                "type": "object",
+                "description": (
+                    "Pipeline definition; select steps accept selector {mode, value}, never regex"
+                ),
+            },
             "conditions": {"type": "array"},
             "operations": {"type": "array"},
+            "filter": {
+                "type": "object",
+                "description": (
+                    "Filter definition; name_selector accepts exact, prefix, suffix, or glob"
+                ),
+            },
             "base_path": {
                 "type": "string",
                 "description": "Output directory relative to the configured filesystem write root",
@@ -139,7 +164,43 @@ def manage_advanced_batch(action: str | None = None, **params: Any) -> dict[str,
 def _pipeline_execute(params):  # type: ignore[no-untyped-def]
     """Execute multi-step processing pipeline."""
     pipeline = params.get("pipeline", {})
-    steps = pipeline.get("steps", [])
+
+    try:
+        if not isinstance(pipeline, dict):
+            raise NameSelectorError("PIPELINE_INVALID", "The pipeline definition is invalid")
+        steps = pipeline.get("steps", [])
+        if not isinstance(steps, list):
+            raise NameSelectorError("PIPELINE_INVALID", "The pipeline steps are invalid")
+        ParsedSelectors: dict[int, NameSelector] = {}
+        for StepIndex, Step in enumerate(steps, 1):
+            if not isinstance(Step, dict):
+                raise NameSelectorError("PIPELINE_STEP_INVALID", "A pipeline step is invalid")
+            if Step.get("type") != "select":
+                continue
+            StepParams = Step.get("params", {})
+            if not isinstance(StepParams, dict):
+                raise NameSelectorError(
+                    "PIPELINE_STEP_INVALID", "A pipeline select step is invalid"
+                )
+            if "pattern" in StepParams:
+                raise NameSelectorError(
+                    "REGEX_SELECTOR_DISABLED",
+                    "Regular-expression selectors are disabled; use selector mode EXACT, PREFIX, SUFFIX, or GLOB",
+                )
+            ParsedSelectors[StepIndex] = ParseNameSelector(
+                StepParams.get("selector", {"mode": "GLOB", "value": "*"})
+            )
+
+        Preselected: dict[int, list[Any]] = {}
+        if ParsedSelectors:
+            ValidateSelectorBudget(len(bpy.data.objects), len(ParsedSelectors))
+            AllObjects = list(bpy.data.objects)
+            for StepIndex, Selector in ParsedSelectors.items():
+                Preselected[StepIndex] = [
+                    Object for Object in AllObjects if Selector.Matches(Object.name)
+                ]
+    except NameSelectorError as Error:
+        return _NameSelectorFailure("PIPELINE_EXECUTE", Error)
 
     results: List[Dict[str, Any]] = []
     context: Dict[str, Any] = {}  # Shared context between steps
@@ -156,8 +217,7 @@ def _pipeline_execute(params):  # type: ignore[no-untyped-def]
 
         try:
             if step_type == "select":
-                pattern = step_params.get("pattern", ".*")
-                matched = [o for o in bpy.data.objects if re.match(pattern, o.name)]
+                matched = Preselected[i]
                 context["selected"] = matched
                 result["matched"] = len(matched)
 
@@ -716,6 +776,30 @@ def _filter_and_process(params):  # type: ignore[no-untyped-def]
     filter_criteria = params.get("filter", {})
     operations = params.get("operations", [])
 
+    if not isinstance(filter_criteria, dict):
+        return _NameSelectorFailure(
+            "FILTER_AND_PROCESS",
+            NameSelectorError("FILTER_INVALID", "The object filter is invalid"),
+        )
+    if "name_pattern" in filter_criteria:
+        return _NameSelectorFailure(
+            "FILTER_AND_PROCESS",
+            NameSelectorError(
+                "REGEX_SELECTOR_DISABLED",
+                "Regular-expression selectors are disabled; use name_selector mode EXACT, PREFIX, SUFFIX, or GLOB",
+            ),
+        )
+    try:
+        RawSelector = filter_criteria.get("name_selector")
+        Selector = ParseNameSelector(RawSelector) if RawSelector is not None else None
+    except NameSelectorError as Error:
+        return _NameSelectorFailure("FILTER_AND_PROCESS", Error)
+
+    if Selector is not None:
+        try:
+            ValidateSelectorBudget(len(bpy.data.objects))
+        except NameSelectorError as Error:
+            return _NameSelectorFailure("FILTER_AND_PROCESS", Error)
     # Get all objects
     all_objects = list(bpy.data.objects)
 
@@ -728,8 +812,12 @@ def _filter_and_process(params):  # type: ignore[no-untyped-def]
             if obj.type != filter_criteria["type"]:
                 match = False
 
-        if "name_pattern" in filter_criteria:
-            if not re.match(filter_criteria["name_pattern"], obj.name):
+        if Selector is not None:
+            try:
+                NameMatches = Selector.Matches(obj.name)
+            except NameSelectorError as Error:
+                return _NameSelectorFailure("FILTER_AND_PROCESS", Error)
+            if not NameMatches:
                 match = False  # type: ignore
 
         if "has_material" in filter_criteria:

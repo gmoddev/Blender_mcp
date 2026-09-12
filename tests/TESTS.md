@@ -1,14 +1,14 @@
 # Blender MCP — Test Suite Reference
 
-> live-37 | Last Updated: 2026-09-11
+> live-37 | Last Updated: 2026-09-12
 
 ## Overview
 
 | Layer | Directory | Purpose | Tests |
 |-------|-----------|---------|-------|
-| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **847** |
+| **Unit** | `tests/unit/` | Pure-Python tests — no Blender required, run in CI | **868** |
 | **Integration** | `tests/integration/` | 24 mock cases plus 24 live Blender cases | **48** |
-| **Grand total collected** | | | **895** |
+| **Grand total collected** | | | **916** |
 
 All tests are discovered and run by **pytest**. Unit tests mock `bpy` and run in ~1.4 seconds.
 
@@ -45,6 +45,16 @@ shutdown races, callback/payload release, and bounded waits.
 
 ```bash
 uv run pytest tests/unit/test_provider_jobs.py -v
+```
+
+### `test_name_selector.py` (21 tests)
+
+Proves exact/prefix/suffix/glob semantics, bounded grammar and resource limits, legacy regex denial
+before scene access, advanced-pipeline preflight before mutation, shared handler behavior, and static
+absence of regex execution from both batch handlers.
+
+```bash
+uv run pytest tests/unit/test_name_selector.py -v
 ```
 
 ### `test_network_boundary.py` (48 tests)
