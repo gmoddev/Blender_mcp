@@ -18,6 +18,17 @@ CompatibilityAdapters = {
     "blender_mcp/utils/path.py",
     "blender_mcp/utils/path_validator.py",
 }
+ExcludedDirectoryNames = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "venv",
+}
 
 
 class ImportVisitor(ast.NodeVisitor):
@@ -83,19 +94,19 @@ def check_file(file_path: Path) -> List[str]:
         return [f"Failed to parse {file_path}: {e}"]
 
 
+def GetSourceFiles(Root: Path) -> list[Path]:
+    """Return project source without generated, installed, or cached copies."""
+    return [
+        FilePath
+        for FilePath in Root.rglob("*.py")
+        if "blender_mcp" in FilePath.parts
+        and not any(Part in ExcludedDirectoryNames for Part in FilePath.parts)
+    ]
+
+
 def main():
     root = Path(".")
-    files = list(root.rglob("*.py"))
-
-    # Filter for source code only (skip venv, build, etc.)
-    source_files = [
-        f
-        for f in files
-        if "blender_mcp" in f.parts
-        and "venv" not in f.parts
-        and ".git" not in f.parts
-        and "__pycache__" not in f.parts
-    ]
+    source_files = GetSourceFiles(root)
 
     all_errors = []
     print(f"Checking {len(source_files)} files for architectural violations...")

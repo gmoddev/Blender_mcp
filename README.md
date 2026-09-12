@@ -136,25 +136,28 @@ pip install -e ".[dev]"
 
 ### Step 3 — Build the Blender addon ZIP
 
-```bash
-python create_release_zip.py
+```powershell
+python create_release_zip.py --blender-executable 'C:\Path\To\blender.exe'
 # → blender_mcp_v1.0.0.zip
 ```
+
+The release is a Windows x64 Blender Extension with pinned, hash-verified credential-store wheels.
+The builder requires Blender so its native extension validator checks the manifest and package.
 
 ### Step 4 — Install the addon in Blender
 
 ```
-Blender → Edit → Preferences → Add-ons → Install
+Blender → Edit → Preferences → Extensions → Install from Disk
   → select blender_mcp_v1.0.0.zip
   → enable "Blender MCP"
 ```
 
 In Blender Addon Preferences, use **Generate / Rotate Credential** to create the required 256-bit
-base64url token. Copy that exact value to `BLENDER_MCP_AUTH_TOKEN` in the MCP client configuration.
-Do not invent a password: manually chosen tokens are rejected. Then press **N** in the 3D Viewport
-→ **MCP** → **Connect to MCP server**. The server refuses to start without a valid credential and
-binds to loopback only. Addon Preferences are authoritative for the Blender server; the environment
-variable is only its fallback, so a rotated preference cannot silently revert after restart.
+base64url token. Blender and the stdio bridge retrieve the same value from Windows Credential
+Locker; it is never displayed or copied into a `.blend`. Then press **N** in the 3D Viewport →
+**MCP** → **Connect to MCP server**. The server refuses to start without a valid credential and binds
+to loopback only. `BLENDER_MCP_AUTH_TOKEN` remains an explicit process-scoped compatibility fallback
+for isolated testing when the OS slot is absent.
 
 ---
 
@@ -177,7 +180,6 @@ Replace `<path-to-blender-mcp>` with the absolute path where you cloned this rep
       "env": {
         "BLENDER_HOST": "localhost",
         "BLENDER_PORT": "9879",
-        "BLENDER_MCP_AUTH_TOKEN": "<same-credential-as-Blender-preferences>",
         "MCP_TRANSPORT": "stdio",
         "PYTHONPATH": "<path-to-blender-mcp>"
       }
@@ -200,7 +202,6 @@ Replace `<path-to-blender-mcp>` with the absolute path where you cloned this rep
       "env": {
         "BLENDER_HOST": "localhost",
         "BLENDER_PORT": "9879",
-        "BLENDER_MCP_AUTH_TOKEN": "<same-credential-as-Blender-preferences>",
         "MCP_TRANSPORT": "stdio",
         "PYTHONPATH": "<path-to-blender-mcp>"
       }
@@ -224,7 +225,6 @@ enabled = true
 [mcp_servers.blender.env]
 BLENDER_HOST = "localhost"
 BLENDER_PORT = "9879"
-BLENDER_MCP_AUTH_TOKEN = "<same-credential-as-Blender-preferences>"
 MCP_TRANSPORT = "stdio"
 PYTHONPATH = "<path-to-blender-mcp>"
 ```
@@ -256,6 +256,7 @@ python -u <path-to-blender-mcp>/stdio_bridge.py
 | `BLENDER_PORT` | `9879` | TCP port of the Blender addon |
 | `MCP_TRANSPORT` | `stdio` | Transport mode (`stdio` for all current clients) |
 | `PYTHONPATH` | — | Must include the project root so `blender_mcp` is importable |
+| `BLENDER_MCP_AUTH_TOKEN` | OS credential slot | Explicit process-only fallback for isolated tests |
 
 </details>
 

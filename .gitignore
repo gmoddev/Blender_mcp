@@ -37,6 +37,9 @@ parts/
 sdist/
 var/
 wheels/
+!blender_mcp/wheels/
+!blender_mcp/wheels/*.whl
+!blender_mcp/wheels/SHA256SUMS
 *.egg-info/
 pip-wheel-metadata/
 .installed.cfg

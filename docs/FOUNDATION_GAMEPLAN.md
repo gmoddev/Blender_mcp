@@ -324,6 +324,19 @@ dependency/ACL validation, temporary-artifact cleanup, and the complete 0F provi
 Blender 5.2.1 LTS factory-startup validation confirms the four obsolete RNA properties are absent
 and a legacy canary is detected and scrubbed without inspecting its value.
 
+## Eighteenth Implementation Slice: self-contained Windows credential release
+
+The release path now builds a native Blender Extension with a root manifest and six pinned,
+unmodified wheels for `keyring` and its Windows dependencies. SHA-256 verification runs before the
+Blender 5.2 extension builder, distribution metadata and license files remain inside every wheel,
+and the manifest declares Windows x64 plus the file/network permissions this add-on actually uses.
+
+A disposable installed extension proved wheel extraction, the allowlisted WinVault backend, a
+unique non-production Credential Locker write/read/delete cycle, legacy Scene-field scrubbing, and
+a saved `.blend` byte scan without the canary. The sandbox logon session was denied by WinVault while
+the approved user context passed, providing negative evidence that the credential backend is bound
+to a real Windows logon context. No production credential service or account was accessed.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

@@ -3,7 +3,7 @@
 import ast
 from pathlib import Path
 
-from scripts.quality.lint_imports import ImportVisitor
+from scripts.quality.lint_imports import GetSourceFiles, ImportVisitor
 
 
 def CheckImport(FilePath: str, Statement: str) -> list[str]:
@@ -34,3 +34,14 @@ def test_compatibility_adapter_cannot_import_handlers() -> None:
     )
 
     assert Errors == ["Line 1: Utils module importing Handler layer '..handlers.manage_scene'"]
+
+
+def test_generated_installed_copy_is_not_scanned(tmp_path: Path) -> None:
+    Source = tmp_path / "blender_mcp" / "core" / "source.py"
+    InstalledCopy = tmp_path / ".pytest_cache" / "installed" / "blender_mcp" / "core" / "copy.py"
+    Source.parent.mkdir(parents=True)
+    InstalledCopy.parent.mkdir(parents=True)
+    Source.write_text("VALUE = 1\n", encoding="utf-8")
+    InstalledCopy.write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert GetSourceFiles(tmp_path) == [Source]

@@ -32,6 +32,20 @@ not point an unvalidated branch at valuable assets. The current release gates ar
 [`../ROADMAP.md`](../ROADMAP.md), and live validation gaps belong in
 [`security/REMEDIATION_LEDGER.md`](security/REMEDIATION_LEDGER.md).
 
+## Windows extension release
+
+The self-contained extension bundles the exact wheels listed in
+[`security/WHEEL_INVENTORY.md`](security/WHEEL_INVENTORY.md). Build it through Blender's native
+extension command so the manifest and wheel declarations are validated:
+
+```powershell
+python create_release_zip.py --blender-executable 'C:\Path\To\blender.exe'
+& 'C:\Path\To\blender.exe' --command extension validate .\blender_mcp_v1.0.0.zip
+```
+
+Do not update wheel files without updating `SHA256SUMS`, the inventory, locks, dependency audit, and
+the disposable installed-extension validation together.
+
 ## Updating the lock
 
 Create a clean virtual environment, install `.[dev]`, run the required checks, then regenerate the

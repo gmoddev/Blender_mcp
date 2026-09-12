@@ -43,6 +43,7 @@ scenes. Cleanup never copies or logs the values.
 - Existing files may retain dormant legacy values until the user runs cleanup and saves the file.
 - A missing dependency, locked keyring, or unapproved backend produces a redacted failure and does
   not fall back to plaintext storage.
-- Packaged Blender installation must include the pinned keyring runtime and its platform dependency;
-  release packaging and live platform ACL inspection remain required before AUTH-003 is complete.
+- The Windows x64 Blender Extension includes hash-verified, unmodified keyring wheels. A disposable
+  installed extension passed a unique Credential Locker write/read/delete cycle; other platforms
+  remain unsupported until their complete wheel sets and live backends pass the same gate.
 - Provider status remains configuration-only and must not read credential slots.

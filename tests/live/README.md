@@ -39,3 +39,11 @@ outside-root save/open/export denial, sentinel preservation, explicit local over
 approved GLB export, denied sequencer import without editor mutation, approved sequencer image
 import, and a Windows junction escape when junction creation is available, then removes the
 temporary directory.
+
+## Installed credential extension
+
+Build and install the extension into a disposable Blender user resource directory, then run
+`validate_credential_extension.py`. The script requires `BLENDER_MCP_VALIDATION_OUTPUT` to name a
+disposable `.blend`. It uses a unique `gmoddev.BlenderMCP.Validation.*` service, verifies the
+WinVault write/read/delete lifecycle, confirms the entry is gone, scrubs a legacy Scene canary,
+saves, and proves the canary bytes are absent. It never reads or writes production credential slots.
