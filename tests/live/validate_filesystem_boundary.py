@@ -112,7 +112,9 @@ try:
     bpy.data.images.remove(OutsideImageData)
 
     ApprovedImageData = bpy.data.images.load(str(ReadImage))
-    InsideExport = GLTFExporter.export(bpy.context.scene, list(bpy.context.scene.objects), "mesh/hero")
+    InsideExport = GLTFExporter.export(
+        bpy.context.scene, list(bpy.context.scene.objects), "mesh/hero"
+    )
     ExpectedExport = WriteRoot / "mesh" / "hero.glb"
     if not InsideExport.get("success") or not ExpectedExport.is_file():
         raise AssertionError(f"approved export failed: {InsideExport}")
@@ -152,7 +154,10 @@ try:
     EditorAfterDenial = bpy.context.scene.sequence_editor
     HasEditorAfterDenial = EditorAfterDenial is not None
     StripCountAfterDenial = len(_get_sequences(EditorAfterDenial))
-    if HasEditorAfterDenial != HadEditorBeforeDenial or StripCountAfterDenial != StripCountBeforeDenial:
+    if (
+        HasEditorAfterDenial != HadEditorBeforeDenial
+        or StripCountAfterDenial != StripCountBeforeDenial
+    ):
         raise AssertionError("denied sequencer import created an editor")
     ApprovedImage = manage_sequencer(action="ADD_IMAGE", filepath=str(ReadImage))
     if not ApprovedImage.get("success"):

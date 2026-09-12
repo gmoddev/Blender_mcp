@@ -141,9 +141,7 @@ def integration_hunyuan(action=None, **params):  # type: ignore[no-untyped-def]
 def _get_status() -> Dict[str, Any]:
     """Return configuration state without implying that external actions can execute."""
     try:
-        ConfiguredEnabled = bool(
-            getattr(bpy.context.scene, "blendermcp_use_hunyuan3d", False)
-        )
+        ConfiguredEnabled = bool(getattr(bpy.context.scene, "blendermcp_use_hunyuan3d", False))
         Mode = getattr(bpy.context.scene, "blendermcp_hunyuan3d_mode", "OFFICIAL_API")
         return {
             "success": True,

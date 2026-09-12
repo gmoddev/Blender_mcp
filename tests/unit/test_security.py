@@ -41,9 +41,7 @@ class TestSecurityManager:
         finally:
             ConfigureSecurityPolicy(SafeMode=False, RawCodeEnabled=True)
 
-    def test_worker_thread_authorization_never_reads_bpy(
-        self, monkeypatch
-    ) -> None:  # type: ignore[no-untyped-def]
+    def test_worker_thread_authorization_never_reads_bpy(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         class BpyCanary:
             def __getattr__(self, Name: str) -> object:
                 raise AssertionError(f"worker authorization touched bpy.{Name}")
@@ -57,9 +55,7 @@ class TestSecurityManager:
             try:
                 Results.extend(
                     [
-                        SecurityManager.validate_action(
-                            "inspect", "GET", [Capability.READ.value]
-                        ),
+                        SecurityManager.validate_action("inspect", "GET", [Capability.READ.value]),
                         SecurityManager.validate_action(
                             "manage_scene", "RENAME", [Capability.MUTATE.value]
                         ),

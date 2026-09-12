@@ -250,9 +250,7 @@ def test_worker_thread_start_fails_before_reading_blender_preferences() -> None:
     FilesystemRead = MagicMock(
         side_effect=AssertionError("worker startup read filesystem preferences")
     )
-    SecurityRead = MagicMock(
-        side_effect=AssertionError("worker startup read security preferences")
-    )
+    SecurityRead = MagicMock(side_effect=AssertionError("worker startup read security preferences"))
     Server.GetAuthToken = AuthRead  # type: ignore[method-assign]
     Server.GetFilesystemPreferences = FilesystemRead  # type: ignore[method-assign]
     Server.GetSecurityPreferences = SecurityRead  # type: ignore[method-assign]

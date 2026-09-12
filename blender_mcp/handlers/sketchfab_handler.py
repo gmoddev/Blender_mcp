@@ -69,9 +69,7 @@ ExternalCapabilityMessage = (
             "quarantined by the security policy."
         ),
         "properties": {
-            "action": ValidationUtils.generate_enum_schema(
-                SketchfabAction, "Operation to perform"
-            ),
+            "action": ValidationUtils.generate_enum_schema(SketchfabAction, "Operation to perform"),
             "query": {"type": "string", "description": "Reserved while search is disabled."},
             "count": {"type": "integer", "default": 10},
             "uid": {"type": "string", "description": "Reserved while import is disabled."},
@@ -81,9 +79,7 @@ ExternalCapabilityMessage = (
 )
 @validated_handler(actions=[Action.value for Action in SketchfabAction])
 @ensure_main_thread
-def integration_sketchfab(
-    action: Optional[str] = None, **params: Any
-) -> Dict[str, Any]:
+def integration_sketchfab(action: Optional[str] = None, **params: Any) -> Dict[str, Any]:
     """Return configuration status or deny quarantined external actions."""
     del params
 
@@ -104,9 +100,7 @@ def integration_sketchfab(
 def _get_status() -> Dict[str, Any]:
     """Report the saved enablement flag without reading the Scene-stored API key."""
     try:
-        ConfiguredEnabled = bool(
-            getattr(bpy.context.scene, "blendermcp_use_sketchfab", False)
-        )
+        ConfiguredEnabled = bool(getattr(bpy.context.scene, "blendermcp_use_sketchfab", False))
         return {
             "success": True,
             "enabled": ConfiguredEnabled,

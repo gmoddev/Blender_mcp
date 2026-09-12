@@ -115,7 +115,7 @@ def _MergeSafeExporterSettings(
         raise ValueError("Custom exporter settings must be an object")
 
     LockedSettings = LockedSettings or {}
-    for SettingName in (CustomSettings or {}):
+    for SettingName in CustomSettings or {}:
         if not isinstance(SettingName, str):
             raise ValueError("Custom exporter setting names must be strings")
         NormalizedName = str(SettingName).lower()
@@ -464,7 +464,7 @@ class USDExporter:
             # Ensure filepath has correct extension
             if not filepath.lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
                 filepath += ".usd"
-            for SettingName in (custom_settings or {}):
+            for SettingName in custom_settings or {}:
                 if SettingName in {
                     "export_textures",
                     "export_textures_mode",

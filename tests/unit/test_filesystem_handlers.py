@@ -22,7 +22,12 @@ from blender_mcp.core.enums import (
     SequencerAction,
     UVsAction,
 )
-from blender_mcp.core.export_pipeline import BatchExporter, ExportValidator, GLTFExporter, USDExporter
+from blender_mcp.core.export_pipeline import (
+    BatchExporter,
+    ExportValidator,
+    GLTFExporter,
+    USDExporter,
+)
 from blender_mcp.core.filesystem_boundary import ConfigureFilesystemPolicy, ResetFilesystemPolicy
 from blender_mcp.core.security import Capability, SecurityManager
 from blender_mcp.dispatcher import (
@@ -92,8 +97,12 @@ def test_scene_open_preserves_legitimate_inside_root_behavior(
     ConfigureFilesystemPolicy(ReadRoot=ReadRoot)
     OpenMainFile = MagicMock()
     OpenMainFile.return_value = SimpleNamespace(success=True)
-    monkeypatch.setattr(SceneModule, "safe_ops", SimpleNamespace(wm=SimpleNamespace(open_mainfile=OpenMainFile)))
-    monkeypatch.setattr(SceneModule, "execute_on_main_thread", lambda Function, **_Kwargs: Function())
+    monkeypatch.setattr(
+        SceneModule, "safe_ops", SimpleNamespace(wm=SimpleNamespace(open_mainfile=OpenMainFile))
+    )
+    monkeypatch.setattr(
+        SceneModule, "execute_on_main_thread", lambda Function, **_Kwargs: Function()
+    )
 
     Result = SceneModule._handle_open_file(filepath=str(ScenePath))
 
@@ -129,8 +138,12 @@ def test_scene_save_revalidates_current_file_and_preserves_approved_save(
     SaveMainFile = MagicMock()
     SaveMainFile.return_value = SimpleNamespace(success=True)
     monkeypatch.setattr(SceneModule.bpy.data, "filepath", str(Target))
-    monkeypatch.setattr(SceneModule, "safe_ops", SimpleNamespace(wm=SimpleNamespace(save_mainfile=SaveMainFile)))
-    monkeypatch.setattr(SceneModule, "execute_on_main_thread", lambda Function, **_Kwargs: Function())
+    monkeypatch.setattr(
+        SceneModule, "safe_ops", SimpleNamespace(wm=SimpleNamespace(save_mainfile=SaveMainFile))
+    )
+    monkeypatch.setattr(
+        SceneModule, "execute_on_main_thread", lambda Function, **_Kwargs: Function()
+    )
 
     Result = SceneModule._handle_save_file()
 
@@ -525,7 +538,9 @@ def test_adjacent_uv_unity_and_cloud_routes_fail_before_file_sinks(
     UVExport = MagicMock()
     UnityExport = MagicMock()
     PackAll = MagicMock()
-    monkeypatch.setattr(UVModule, "safe_ops", SimpleNamespace(uv=SimpleNamespace(export_layout=UVExport)))
+    monkeypatch.setattr(
+        UVModule, "safe_ops", SimpleNamespace(uv=SimpleNamespace(export_layout=UVExport))
+    )
     monkeypatch.setattr(
         UnityModule,
         "safe_ops",
@@ -789,9 +804,7 @@ def test_headless_render_aliases_are_quarantined_before_scene_or_output_mutation
         scene_name="Scene",
         output_path="outside.png",
     )
-    CoreResult = HeadlessCoreModule.HeadlessModeManager.render_headless(
-        object(), "outside.png", 1
-    )
+    CoreResult = HeadlessCoreModule.HeadlessModeManager.render_headless(object(), "outside.png", 1)
     Blender50Result = Blender50FeaturesModule.HeadlessModeManager.render_headless(
         object(), "outside.png", 1
     )
@@ -967,9 +980,7 @@ def test_filesystem_routes_declare_capabilities() -> None:
         Capability.MUTATE.value,
         Capability.FILESYSTEM_WRITE.value,
     ]
-    assert HANDLER_METADATA["manage_export"]["capabilities"][
-        ExportAction.EXPORT_GLTF.value
-    ] == [
+    assert HANDLER_METADATA["manage_export"]["capabilities"][ExportAction.EXPORT_GLTF.value] == [
         Capability.MUTATE.value,
         Capability.FILESYSTEM_WRITE.value,
     ]
@@ -992,15 +1003,17 @@ def test_filesystem_routes_declare_capabilities() -> None:
     assert HANDLER_METADATA["manage_sequencer"]["capabilities"][
         SequencerAction.RENDER_PREVIEW.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
-    assert HANDLER_METADATA["manage_light"]["capabilities"][
-        LightAction.SETUP_HDRI.value
-    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
+    assert HANDLER_METADATA["manage_light"]["capabilities"][LightAction.SETUP_HDRI.value] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_READ.value,
+    ]
     assert HANDLER_METADATA["manage_headless_mode"]["capabilities"][
         HeadlessModeAction.RENDER_HEADLESS.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_WRITE.value]
-    assert HANDLER_METADATA["manage_mocap"]["capabilities"][
-        MocapAction.IMPORT_BVH.value
-    ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]
+    assert HANDLER_METADATA["manage_mocap"]["capabilities"][MocapAction.IMPORT_BVH.value] == [
+        Capability.MUTATE.value,
+        Capability.FILESYSTEM_READ.value,
+    ]
     assert HANDLER_METADATA["manage_mocap"]["capabilities"][
         MocapAction.IMPORT_FBX_ANIMATION.value
     ] == [Capability.MUTATE.value, Capability.FILESYSTEM_READ.value]

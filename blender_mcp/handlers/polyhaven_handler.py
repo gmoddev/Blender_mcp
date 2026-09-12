@@ -77,9 +77,7 @@ ExternalCapabilityMessage = (
             "quarantined by the security policy."
         ),
         "properties": {
-            "action": ValidationUtils.generate_enum_schema(
-                PolyHavenAction, "Operation to perform"
-            ),
+            "action": ValidationUtils.generate_enum_schema(PolyHavenAction, "Operation to perform"),
             "query": {"type": "string", "description": "Reserved while search is disabled."},
             "asset_type": {
                 "type": "string",
@@ -99,9 +97,7 @@ ExternalCapabilityMessage = (
 )
 @validated_handler(actions=[Action.value for Action in PolyHavenAction])
 @ensure_main_thread
-def integration_polyhaven(
-    action: Optional[str] = None, **params: Any
-) -> Dict[str, Any]:
+def integration_polyhaven(action: Optional[str] = None, **params: Any) -> Dict[str, Any]:
     """Return configuration status or deny quarantined external actions."""
     del params
 
@@ -122,9 +118,7 @@ def integration_polyhaven(
 def _get_status() -> Dict[str, Any]:
     """Return saved configuration without implying operational availability."""
     try:
-        ConfiguredEnabled = bool(
-            getattr(bpy.context.scene, "blendermcp_use_polyhaven", True)
-        )
+        ConfiguredEnabled = bool(getattr(bpy.context.scene, "blendermcp_use_polyhaven", True))
         return {
             "success": True,
             "enabled": ConfiguredEnabled,

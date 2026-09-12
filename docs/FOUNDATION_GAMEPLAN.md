@@ -293,9 +293,9 @@ adapters as permitted `utils`-to-`core` delegates. Focused tests prove ordinary 
 cannot import `core`, and the adapters still cannot import handlers. This preserves existing public
 imports without weakening the general dependency rule.
 
-The fast eight-check quality gate passes. The stricter twelve-check gate still records inherited
-repository-wide formatter drift and Blender-stub mypy failures; those remain separate cleanup work
-and are not treated as evidence that this containment slice failed.
+The fast eight-check quality gate and repository-wide Ruff format check pass. The stricter
+twelve-check gate is now 11/12; inherited Blender-stub mypy failures remain separate typed-baseline
+work and are not treated as evidence that this containment slice failed.
 
 ### Milestone 0: Baseline and scan readiness
 

@@ -86,9 +86,7 @@ ExternalCapabilityMessage = (
 )
 @validated_handler(actions=[Action.value for Action in Hyper3DAction])
 @ensure_main_thread
-def integration_hyper3d(
-    action: Optional[str] = None, **params: Any
-) -> Dict[str, Any]:
+def integration_hyper3d(action: Optional[str] = None, **params: Any) -> Dict[str, Any]:
     """Return configuration status or deny quarantined external actions."""
     del params
 
@@ -109,9 +107,7 @@ def integration_hyper3d(
 def _get_status() -> Dict[str, Any]:
     """Report saved configuration without reading any Scene-stored API key."""
     try:
-        ConfiguredEnabled = bool(
-            getattr(bpy.context.scene, "blendermcp_use_hyper3d", False)
-        )
+        ConfiguredEnabled = bool(getattr(bpy.context.scene, "blendermcp_use_hyper3d", False))
         Mode = getattr(bpy.context.scene, "blendermcp_hyper3d_mode", "RODIN")
         return {
             "success": True,

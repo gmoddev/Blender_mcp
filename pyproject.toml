@@ -74,6 +74,7 @@ exclude = [
     "build",
     "dist",
     "scripts",
+    "docs/security",
 ]
 
 [tool.ruff.lint]

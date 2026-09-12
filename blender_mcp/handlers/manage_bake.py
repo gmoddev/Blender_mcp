@@ -35,7 +35,9 @@ from typing import Any, Tuple, Optional
 logger = get_logger()
 
 BakeOutputActions = {
-    Action.value for Action in BakeAction if Action.value == "BAKE" or Action.value.startswith("BAKE_")
+    Action.value
+    for Action in BakeAction
+    if Action.value == "BAKE" or Action.value.startswith("BAKE_")
 }
 BakeCapabilities = {Action.value: [Capability.MUTATE.value] for Action in BakeAction}
 for OutputAction in BakeOutputActions:

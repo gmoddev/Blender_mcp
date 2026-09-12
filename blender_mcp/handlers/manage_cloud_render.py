@@ -37,9 +37,7 @@ from typing import Any
 logger = get_logger()
 
 
-CloudRenderCapabilities = {
-    Action.value: [Capability.MUTATE.value] for Action in CloudRenderAction
-}
+CloudRenderCapabilities = {Action.value: [Capability.MUTATE.value] for Action in CloudRenderAction}
 CloudRenderCapabilities[CloudRenderAction.VALIDATE_SCENE.value] = [
     Capability.READ.value,
     Capability.FILESYSTEM_READ.value,

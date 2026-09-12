@@ -188,7 +188,6 @@ def _handle_save_file(**params: Any) -> Dict[str, Any]:
     path = params.get("filepath")
 
     try:
-
         if path:
             safe_path = get_safe_path(
                 path,

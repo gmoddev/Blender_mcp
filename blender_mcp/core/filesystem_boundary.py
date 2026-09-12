@@ -36,7 +36,14 @@ class FilesystemDecision:
 
 
 WindowsReservedNames = frozenset(
-    {"CON", "PRN", "AUX", "NUL", *(f"COM{Index}" for Index in range(1, 10)), *(f"LPT{Index}" for Index in range(1, 10))}
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{Index}" for Index in range(1, 10)),
+        *(f"LPT{Index}" for Index in range(1, 10)),
+    }
 )
 
 

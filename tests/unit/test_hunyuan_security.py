@@ -101,7 +101,9 @@ def test_direct_handler_calls_fail_closed_without_file_network_or_timer_io(
     Params: dict[str, str],
 ) -> None:
     with (
-        patch.object(builtins, "open", side_effect=AssertionError("file I/O attempted")) as OpenFile,
+        patch.object(
+            builtins, "open", side_effect=AssertionError("file I/O attempted")
+        ) as OpenFile,
         patch.object(
             socket,
             "create_connection",

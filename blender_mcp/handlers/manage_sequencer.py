@@ -72,9 +72,7 @@ MediaExtensionsByAction = {
     SequencerAction.ADD_IMAGE.value: ImageExtensions,
     SequencerAction.ADD_IMAGE_STRIP.value: ImageExtensions,
 }
-SequencerCapabilities = {
-    Action.value: [Capability.MUTATE.value] for Action in SequencerAction
-}
+SequencerCapabilities = {Action.value: [Capability.MUTATE.value] for Action in SequencerAction}
 for MediaAction in MediaExtensionsByAction:
     SequencerCapabilities[MediaAction] = [
         Capability.MUTATE.value,
@@ -394,8 +392,7 @@ def _handle_add_movie(seq_editor: Any, params: dict[str, Any]) -> dict[str, Any]
             action=SequencerAction.ADD_MOVIE.value,
             error_code="UNSUPPORTED_FORMAT",
             message=(
-                f"'{ext}' desteklenmiyor. "
-                f"Desteklenen video formatları: {sorted(VideoExtensions)}"
+                f"'{ext}' desteklenmiyor. Desteklenen video formatları: {sorted(VideoExtensions)}"
             ),
         )
 

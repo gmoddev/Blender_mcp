@@ -70,9 +70,7 @@ ExportPipelineCapabilities[ExportPipelineAction.VALIDATE_GLTF.value] = [
     Capability.READ.value,
     Capability.FILESYSTEM_READ.value,
 ]
-ExportPipelineCapabilities[ExportPipelineAction.VALIDATE_FOR_EXPORT.value] = [
-    Capability.READ.value
-]
+ExportPipelineCapabilities[ExportPipelineAction.VALIDATE_FOR_EXPORT.value] = [Capability.READ.value]
 
 
 def _ConcreteExportPath(Action: str | None, FilePath: str) -> str:
@@ -220,8 +218,7 @@ def manage_export_pipeline(action: str | None = None, **params: Any) -> dict[str
         ExportPipelineAction.EXPORT_GLTF_DRACO.value,
     }
     RequestedFormats = [
-        str(Format).upper()
-        for Format in params.get("formats", ["GLB", "FBX", "USD"])
+        str(Format).upper() for Format in params.get("formats", ["GLB", "FBX", "USD"])
     ]
     if action in GlbActions or (
         action

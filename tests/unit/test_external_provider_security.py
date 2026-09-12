@@ -15,7 +15,12 @@ import pytest
 
 from blender_mcp.core.enums import Hyper3DAction, PolyHavenAction, SketchfabAction
 from blender_mcp.core.security import Capability, ConfigureSecurityPolicy
-from blender_mcp.dispatcher import HANDLER_METADATA, HANDLER_REGISTRY, dispatch_command, load_handlers
+from blender_mcp.dispatcher import (
+    HANDLER_METADATA,
+    HANDLER_REGISTRY,
+    dispatch_command,
+    load_handlers,
+)
 from blender_mcp.handlers import hyper3d_handler as Hyper3DModule
 from blender_mcp.handlers import polyhaven_handler as PolyHavenModule
 from blender_mcp.handlers import sketchfab_handler as SketchfabModule
@@ -148,7 +153,9 @@ def test_direct_provider_actions_fail_without_file_network_temp_or_blender_io(
     Case: ProviderCase,
 ) -> None:
     with (
-        patch.object(builtins, "open", side_effect=AssertionError("file I/O attempted")) as OpenFile,
+        patch.object(
+            builtins, "open", side_effect=AssertionError("file I/O attempted")
+        ) as OpenFile,
         patch.object(
             socket, "create_connection", side_effect=AssertionError("network I/O attempted")
         ) as CreateConnection,

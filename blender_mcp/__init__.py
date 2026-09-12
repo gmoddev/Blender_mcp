@@ -468,10 +468,10 @@ class BlenderMCPServer:
                         Session.SessionId,
                     )
                 ExposedIds = {ScopedRequestId: RequestId}
-                if (
-                    Command.get("tool") == "manage_command_lifecycle"
-                    and Params.get("action") in {"GET_STATUS", "CANCEL"}
-                ):
+                if Command.get("tool") == "manage_command_lifecycle" and Params.get("action") in {
+                    "GET_STATUS",
+                    "CANCEL",
+                }:
                     TargetRequestId = Params.get("target_request_id")
                     if not isinstance(TargetRequestId, str):
                         raise SessionError(
@@ -480,9 +480,7 @@ class BlenderMCPServer:
                             RequestId,
                             Session.SessionId,
                         )
-                    ScopedTargetId = BuildScopedRequestId(
-                        Session.ClientInstanceId, TargetRequestId
-                    )
+                    ScopedTargetId = BuildScopedRequestId(Session.ClientInstanceId, TargetRequestId)
                     Params = dict(Params)
                     Params["target_request_id"] = ScopedTargetId
                     Command["params"] = Params

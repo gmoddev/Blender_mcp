@@ -321,6 +321,7 @@ Mode deny it; use only after explicitly enabling Raw Code Mode.
 ```python
 # Create a metallic sphere
 import bpy, bmesh
+
 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, location=(0, 0, 1))
 obj = bpy.context.active_object
 mat = bpy.data.materials.new("Metal")
@@ -506,6 +507,7 @@ Create a file in `blender_mcp/handlers/` with `@register_handler`. Auto-discover
 ```python
 from ..dispatcher import register_handler
 
+
 @register_handler(
     "manage_my_feature",
     actions=["CREATE", "DELETE", "LIST"],
@@ -513,12 +515,12 @@ from ..dispatcher import register_handler
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["CREATE", "DELETE", "LIST"]},
-            "name":   {"type": "string"},
+            "name": {"type": "string"},
         },
         "required": ["action"],
     },
     category="scene",
-    priority=60,          # 1-9=ESSENTIAL, 10-49=CORE, 50-149=STANDARD, 150+=OPTIONAL
+    priority=60,  # 1-9=ESSENTIAL, 10-49=CORE, 50-149=STANDARD, 150+=OPTIONAL
     description="STANDARD — Create, delete, and list my features.",
 )
 def manage_my_feature(action, **params):
