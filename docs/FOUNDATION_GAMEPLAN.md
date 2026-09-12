@@ -308,6 +308,22 @@ does not follow Blender-bound imports. Mypy is pinned to the lockfile's validate
 This makes all twelve quality checks actionable and green without claiming whole-repository static
 typing. Expanding the typed surface remains incremental work and must not use blanket error ignores.
 
+## Seventeenth Implementation Slice: Foundation 0G credential boundary
+
+A fixed-purpose credential service now stores the control token and future provider secrets through
+allowlisted core OS keyring backends. Null, failure, unrecognized, and third-party chained backends
+fail closed with redacted errors. Blender and the stdio bridge resolve the same control slot, and
+rotation persists before it revokes active sessions. The credential boundary is included in the
+strict typed control-plane gate.
+
+Provider secret fields are no longer registered or drawn on Scene, preventing new `.blend` files
+from acquiring them through the add-on. Existing files are inspected only for legacy property names:
+they receive a warning and an explicit confirmed scrub action, with no automatic promotion into the
+trusted keyring. Provider actions remain quarantined until secure credential entry, packaged-Blender
+dependency/ACL validation, temporary-artifact cleanup, and the complete 0F provider contracts pass.
+Blender 5.2.1 LTS factory-startup validation confirms the four obsolete RNA properties are absent
+and a legacy canary is detected and scrubbed without inspecting its value.
+
 ### Milestone 0: Baseline and scan readiness
 
 1. Run the unit suite and record failures without normalizing them away.

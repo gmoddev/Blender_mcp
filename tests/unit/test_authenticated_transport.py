@@ -17,6 +17,7 @@ sys.modules.setdefault("bmesh", MagicMock())
 
 from blender_mcp import BlenderMCPServer  # noqa: E402
 from blender_mcp.core.filesystem_boundary import ResetFilesystemPolicy  # noqa: E402
+from blender_mcp.core.credential_store import CredentialStoreError  # noqa: E402
 from blender_mcp.core.security import GetSecurityPolicy, ResetSecurityPolicy  # noqa: E402
 from blender_mcp.core.protocol import recv_message, send_message  # noqa: E402
 from blender_mcp.core.session import (  # noqa: E402
@@ -191,15 +192,46 @@ def test_bridge_rejects_remote_host_before_socket_creation() -> None:
     assert Bridge._LastErrorCode == "REMOTE_HOST_DISABLED"
 
 
-def test_preference_rotation_wins_over_stale_environment_after_restart() -> None:
-    Addon = MagicMock()
-    Addon.preferences.auth_token = ROTATED_TOKEN
+def test_os_store_rotation_wins_over_stale_environment_after_restart() -> None:
     with (
         patch.dict(os.environ, {"BLENDER_MCP_AUTH_TOKEN": TOKEN}),
-        patch("blender_mcp.bpy.context.preferences.addons.get", return_value=Addon),
+        patch(
+            "blender_mcp.core.credential_store.GetSystemCredential",
+            return_value=ROTATED_TOKEN,
+        ),
     ):
         RestartedServer = BlenderMCPServer()
         assert RestartedServer.GetAuthToken() == ROTATED_TOKEN
+
+
+def test_bridge_uses_same_os_store_and_never_reads_scene_data() -> None:
+    with (
+        patch.dict(os.environ, {"BLENDER_MCP_AUTH_TOKEN": TOKEN}),
+        patch(
+            "blender_mcp.core.credential_store.GetSystemCredential",
+            return_value=ROTATED_TOKEN,
+        ) as CredentialRead,
+    ):
+        Bridge = MCPBridge()
+
+    assert Bridge.AuthToken == ROTATED_TOKEN
+    CredentialRead.assert_called_once()
+
+
+def test_keyring_read_failure_does_not_restore_stale_environment_token() -> None:
+    ReadFailure = CredentialStoreError(
+        "CREDENTIAL_READ_FAILED",
+        "The OS credential store could not read the credential",
+    )
+    with (
+        patch.dict(os.environ, {"BLENDER_MCP_AUTH_TOKEN": TOKEN}),
+        patch(
+            "blender_mcp.core.credential_store.GetSystemCredential",
+            side_effect=ReadFailure,
+        ),
+    ):
+        assert BlenderMCPServer().GetAuthToken() == ""
+        assert MCPBridge().AuthToken == ""
 
 
 def test_filesystem_preferences_are_user_scoped_and_typed() -> None:

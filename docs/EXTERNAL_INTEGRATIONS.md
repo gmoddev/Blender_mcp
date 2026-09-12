@@ -28,6 +28,12 @@ but cannot revoke a callback or function reference that old code already capture
 - Explicit authorization and size/type validation before any local file leaves the machine.
 - OS/user-scoped provider credentials; no secrets in Scene or temporary `.blend` copies.
 
+The shared 0G store now defines fixed OS-backed slots and new provider secret properties are absent
+from Scene registration. Existing `.blend` files are warned by legacy field name and can be scrubbed
+only through an explicit confirmed action; untrusted Scene values are never imported into the OS
+store. Secure provider-entry UI, packaged-runtime validation, and temporary-artifact proof remain,
+so external provider actions stay quarantined.
+
 ## Re-enable Gate
 
 Each provider stays untrusted until its complete source-to-sink path uses the shared controls and

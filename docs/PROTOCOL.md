@@ -63,16 +63,16 @@ reconnects for in-process reconciliation; a new bridge process receives a new na
 
 ## Credential Configuration and Rotation
 
-The Blender add-on reads its credential from user-scoped Addon Preferences, falling back to
-`BLENDER_MCP_AUTH_TOKEN` only when the preference is empty; it never reads Scene data. The bridge
-reads the environment variable unless explicitly supplied by an embedding application. Protocol v2
-accepts only the canonical 43-character base64url encoding produced from 32 random bytes by the
-add-on's generate/rotate action. Preference precedence ensures a stale environment value cannot
-become authoritative again after UI rotation and restart. Rotation increments the auth epoch,
-changes the instance identity, and closes active sockets.
+The Blender add-on and stdio bridge read the same `control/auth-token` entry from the user OS
+credential store and never consult Scene data. An explicit embedding argument takes precedence.
+`BLENDER_MCP_AUTH_TOKEN` remains a process-scoped compatibility fallback only when no OS value can
+be resolved. Protocol v2 accepts only the canonical 43-character base64url encoding produced from
+32 random bytes by the add-on's generate/rotate action.
 
-This initial storage is outside `.blend` files but is not yet an OS credential manager. Foundation
-0G must replace it with OS-backed storage and verify ACLs.
+Rotation commits the new OS value before changing server state, then increments the auth epoch,
+changes the instance identity, and closes active sockets. Null, failure, unrecognized, and
+third-party plaintext keyring backends fail closed. Packaged-Blender validation and platform ACL
+inspection remain before AUTH-003 can be marked complete.
 
 ## Retry Contract
 

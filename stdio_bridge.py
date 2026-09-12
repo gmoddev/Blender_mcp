@@ -45,7 +45,7 @@ class MCPBridge:
         self.host = host
         self.port = port
         self.client_socket = None
-        self.AuthToken = auth_token or os.environ.get("BLENDER_MCP_AUTH_TOKEN", "")
+        self.AuthToken = self.GetAuthToken(auth_token)
         self.ClientInstanceId = str(uuid.uuid4())
         self.Session = None
         self._TransactionLock = threading.RLock()
@@ -55,6 +55,28 @@ class MCPBridge:
         self._tool_schemas: Dict[str, dict] = {}
         self._tool_descriptions: Dict[str, str] = {}
         self._schemas_loaded = False
+
+    @staticmethod
+    def GetAuthToken(AuthToken=None):
+        """Resolve an explicit, OS-backed, or process-scoped control credential."""
+        if isinstance(AuthToken, str) and AuthToken.strip():
+            return AuthToken.strip()
+        try:
+            from blender_mcp.core.credential_store import (
+                CredentialName,
+                CredentialStoreError,
+                GetSystemCredential,
+            )
+
+            StoredToken = GetSystemCredential(CredentialName.CONTROL_AUTH_TOKEN)
+            if StoredToken is not None:
+                return StoredToken.strip()
+        except CredentialStoreError as Error:
+            if Error.Code != "CREDENTIAL_BACKEND_UNAVAILABLE":
+                return ""
+        except ImportError:
+            pass
+        return os.environ.get("BLENDER_MCP_AUTH_TOKEN", "").strip()
 
     def connect(self):
         """Establish and authenticate a connection to Blender."""

@@ -73,9 +73,10 @@ a server restart; future dynamic updates must publish a new snapshot from a main
 The legacy `utils.path` and `utils.path_validator` modules are exact compatibility adapters into the
 core-owned filesystem boundary; the architecture gate permits no other `utils`-to-`core` imports.
 
-Secrets never appear in protocol logs or message previews. The control credential is outside Scene,
-but OS-backed storage is still required. Protocol v2 binds a bridge-instance namespace and session
-identity into mutual-HMAC authentication; it does not claim per-frame cryptographic integrity.
+Secrets never appear in protocol logs or message previews. `core/credential_store.py` owns fixed
+control and provider slots in an allowlisted OS keyring backend; the bridge and add-on share the
+control slot. Protocol v2 binds a bridge-instance namespace and session identity into mutual-HMAC
+authentication; it does not claim per-frame cryptographic integrity.
 
 ## Migration Risks
 
@@ -92,7 +93,9 @@ identity into mutual-HMAC authentication; it does not claim per-frame cryptograp
   callbacks.
 - The shared queue's authenticated timeout, cancellation, duplicate, response-loss/reconnect, and
   shutdown paths are live-validated on Blender 5.2.1 in disposable factory sessions.
-- Provider credentials remain Scene properties. Scene/export file sinks now use a central
+- Provider credential properties are no longer registered on Scene. Existing `.blend` files may
+  retain dormant legacy ID properties until the user confirms cleanup; they are never silently
+  promoted into the OS keyring. Scene/export file sinks now use a central
   user-scoped path authority. Every unpacked file-backed image is conservatively authorized before
   GLB export; tiled/sequence/movie image families fail closed. OBJ material sidecars are disabled.
   Blender 5.2 USD export uses the schema-confirmed `KEEP` mode with texture overwrite and

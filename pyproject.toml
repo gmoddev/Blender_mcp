@@ -16,6 +16,7 @@ classifiers = [
 ]
 dependencies = [ # For Integrations (Rodin, Hunyuan)
  "jsonschema>=4.26.0",
+ "keyring==25.7.0",
  "pydantic>=2.12.5",
 ]
 

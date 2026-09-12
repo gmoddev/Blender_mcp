@@ -159,7 +159,37 @@ except ImportError:
     dispatcher = importlib.import_module("dispatcher")
 
 # Data for Integration
-# SECURITY: API keys must be set via Blender preferences or environment variables
+# SECURITY: Credential values must never be registered on bpy.types.Scene.
+LegacySceneCredentialProperties = (
+    "blendermcp_sketchfab_api_key",
+    "blendermcp_hyper3d_api_key",
+    "blendermcp_hunyuan3d_secret_id",
+    "blendermcp_hunyuan3d_secret_key",
+)
+
+
+def HasLegacySceneCredentials(Scene):
+    """Inspect property names only; never read or log a legacy credential value."""
+    try:
+        SceneKeys = set(Scene.keys())
+    except (AttributeError, TypeError):
+        return False
+    return any(Name in SceneKeys for Name in LegacySceneCredentialProperties)
+
+
+def PurgeLegacySceneCredentials(Scenes):
+    """Remove old credential-bearing ID properties after an explicit user action."""
+    RemovedCount = 0
+    for Scene in Scenes:
+        try:
+            SceneKeys = set(Scene.keys())
+        except (AttributeError, TypeError):
+            continue
+        for Name in LegacySceneCredentialProperties:
+            if Name in SceneKeys:
+                del Scene[Name]
+                RemovedCount += 1
+    return RemovedCount
 
 
 class BlenderMCPServer:
@@ -253,12 +283,19 @@ class BlenderMCPServer:
             return self.AuthToken.strip()
 
         try:
-            Addon: Any = bpy.context.preferences.addons.get(__package__)
-            if Addon:
-                PreferenceToken = str(getattr(Addon.preferences, "auth_token", "") or "").strip()
-                if PreferenceToken:
-                    return PreferenceToken
-        except (AttributeError, KeyError, TypeError):
+            from .core.credential_store import (
+                CredentialName,
+                CredentialStoreError,
+                GetSystemCredential,
+            )
+
+            StoredToken = GetSystemCredential(CredentialName.CONTROL_AUTH_TOKEN)
+            if StoredToken is not None:
+                return StoredToken.strip()
+        except CredentialStoreError as Error:
+            if Error.Code != "CREDENTIAL_BACKEND_UNAVAILABLE":
+                return ""
+        except ImportError:
             pass
 
         EnvironmentToken = os.environ.get("BLENDER_MCP_AUTH_TOKEN", "").strip()
@@ -604,32 +641,53 @@ class BLENDERMCP_OT_RotateAuthToken(bpy.types.Operator):
     bl_description = "Generate a new credential and revoke active MCP sessions"
 
     def execute(self, context):
-        Addon = context.preferences.addons.get(__package__)
-        if not Addon:
-            log_debug("[BlenderMCP:Auth] Credential rotation failed; preferences unavailable")
-            return {"CANCELLED"}
+        from .core.credential_store import (
+            CredentialName,
+            CredentialStoreError,
+            SetSystemCredential,
+        )
 
         NewToken = secrets.token_urlsafe(32)
-        Addon.preferences.auth_token = NewToken
+        try:
+            SetSystemCredential(CredentialName.CONTROL_AUTH_TOKEN, NewToken)
+        except CredentialStoreError:
+            log_debug("[BlenderMCP:Auth] Credential rotation failed; OS store unavailable")
+            self.report({"ERROR"}, "Authentication credential was not changed; inspect MCP logs")
+            return {"CANCELLED"}
+
         Server = getattr(bpy.types, "blendermcp_server", None)
         if Server:
             Server.RotateAuthToken(NewToken)
-        log_debug("[BlenderMCP:Auth] New user-scoped credential generated")
+        log_debug("[BlenderMCP:Auth] New OS-backed credential generated")
+        self.report({"INFO"}, "Authentication credential rotated in the OS credential store")
+        return {"FINISHED"}
+
+
+class BLENDERMCP_OT_PurgeLegacySceneCredentials(bpy.types.Operator):
+    bl_idname = "blendermcp.purge_legacy_scene_credentials"
+    bl_label = "Remove Legacy Scene Credentials"
+    bl_description = "Permanently remove old provider credentials from every open scene"
+    bl_options = {"UNDO"}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        try:
+            RemovedCount = PurgeLegacySceneCredentials(bpy.data.scenes)
+        except Exception:
+            log_debug("[BlenderMCP:Credentials] Legacy Scene credential cleanup failed")
+            self.report(
+                {"ERROR"}, "Legacy credentials were not completely removed; inspect MCP logs"
+            )
+            return {"CANCELLED"}
+        log_debug(f"[BlenderMCP:Credentials] Removed {RemovedCount} legacy Scene credential fields")
+        self.report({"INFO"}, f"Removed {RemovedCount} legacy credential fields")
         return {"FINISHED"}
 
 
 class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__  # Use package name for preferences
-
-    auth_token: str = cast(
-        str,
-        StringProperty(
-            name="Authentication Credential",
-            description="User-scoped MCP credential; copy it to BLENDER_MCP_AUTH_TOKEN",
-            default="",
-            subtype="PASSWORD",
-        ),
-    )
 
     safe_mode: bool = cast(
         bool,
@@ -684,7 +742,7 @@ class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
         # Security Section
         layout.label(text="Security:", icon="LOCKED")
         box = layout.box()
-        box.prop(self, "auth_token", text="Authentication Credential")
+        box.label(text="Authentication credential: OS credential store", icon="KEYINGSET")
         box.operator("blendermcp.rotate_auth_token", icon="FILE_REFRESH")
         box.prop(self, "safe_mode", text="Safe Mode (Disable Python Execution)")
         box.prop(self, "raw_code_enabled", text="Allow Raw Python (High Risk)")
@@ -745,11 +803,11 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
                 box = layout.box()
                 if box:
                     box.prop(scene, "blendermcp_hyper3d_mode", text="Mode")
-                    box.prop(scene, "blendermcp_hyper3d_api_key", text="API Key")
+                    box.label(text="Credential: OS credential store", icon="KEYINGSET")
 
             layout.prop(scene, "blendermcp_use_sketchfab", text="Sketchfab Integration")
             if scene.blendermcp_use_sketchfab:
-                layout.prop(scene, "blendermcp_sketchfab_api_key", text="API Key")
+                layout.label(text="Credential: OS credential store", icon="KEYINGSET")
 
             layout.prop(scene, "blendermcp_use_hunyuan3d", text="Hunyuan3D Integration")
 
@@ -758,8 +816,7 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
                 if box:
                     box.prop(scene, "blendermcp_hunyuan3d_mode", text="Mode")
                     if scene.blendermcp_hunyuan3d_mode == "OFFICIAL_API":
-                        box.prop(scene, "blendermcp_hunyuan3d_secret_id", text="Secret ID")
-                        box.prop(scene, "blendermcp_hunyuan3d_secret_key", text="Secret Key")
+                        box.label(text="Credentials: OS credential store", icon="KEYINGSET")
                     else:
                         box.prop(scene, "blendermcp_hunyuan3d_api_url", text="API URL")
 
@@ -775,6 +832,11 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
                     )
                     box.prop(scene, "blendermcp_hunyuan3d_guidance_scale", text="Guidance Scale")
                     box.prop(scene, "blendermcp_hunyuan3d_texture", text="Generate Texture")
+
+            if any(HasLegacySceneCredentials(Scene) for Scene in bpy.data.scenes):
+                warning = layout.box()
+                warning.label(text="Legacy credentials remain in this Blender file", icon="ERROR")
+                warning.operator("blendermcp.purge_legacy_scene_credentials", icon="TRASH")
 
         layout.separator()
 
@@ -868,6 +930,7 @@ class BLENDERMCP_OT_DebugTools(bpy.types.Operator):
 
 classes = (
     BLENDERMCP_OT_RotateAuthToken,
+    BLENDERMCP_OT_PurgeLegacySceneCredentials,
     BLENDERMCP_OT_StartServer,
     BLENDERMCP_OT_StopServer,
     BLENDERMCP_OT_OpenTerms,
@@ -939,10 +1002,6 @@ def register():
                 "blendermcp_use_sketchfab",
                 BoolProperty(name="Use assets from Sketchfab", default=False),  # type: ignore[func-returns-value]
             ),
-            (
-                "blendermcp_sketchfab_api_key",
-                StringProperty(name="API Key", default="", subtype="PASSWORD"),  # type: ignore[func-returns-value]
-            ),
             ("blendermcp_use_hyper3d", BoolProperty(name="Use Hyper3D", default=False)),  # type: ignore[func-returns-value]
             (
                 "blendermcp_hyper3d_mode",
@@ -952,10 +1011,6 @@ def register():
                     default="MAIN_SITE",
                 ),
             ),
-            (
-                "blendermcp_hyper3d_api_key",
-                StringProperty(name="API Key", default="", subtype="PASSWORD"),  # type: ignore[func-returns-value]
-            ),
             ("blendermcp_use_hunyuan3d", BoolProperty(name="Use Hunyuan3D", default=False)),  # type: ignore[func-returns-value]
             (
                 "blendermcp_hunyuan3d_mode",
@@ -964,14 +1019,6 @@ def register():
                     name="Mode",
                     default="OFFICIAL_API",
                 ),
-            ),
-            (
-                "blendermcp_hunyuan3d_secret_id",
-                StringProperty(name="Secret ID", default="", subtype="PASSWORD"),  # type: ignore[func-returns-value]
-            ),
-            (
-                "blendermcp_hunyuan3d_secret_key",
-                StringProperty(name="Secret Key", default="", subtype="PASSWORD"),  # type: ignore[func-returns-value]
             ),
             (
                 "blendermcp_hunyuan3d_api_url",
@@ -991,6 +1038,13 @@ def register():
             ),
             ("blendermcp_hunyuan3d_texture", BoolProperty(name="Generate Texture", default=True)),  # type: ignore[func-returns-value]
         ]
+
+        # Remove obsolete RNA definitions on hot reload, but never read or silently migrate
+        # untrusted values embedded in an existing .blend. The explicit cleanup operator handles
+        # those ID properties with user confirmation.
+        for LegacyName in LegacySceneCredentialProperties:
+            if hasattr(bpy.types.Scene, LegacyName):
+                delattr(bpy.types.Scene, LegacyName)
 
         for prop_name, prop_value in properties_to_add:
             try:
@@ -1056,14 +1110,10 @@ def unregister():
             "blendermcp_server_running",
             "blendermcp_use_polyhaven",
             "blendermcp_use_sketchfab",
-            "blendermcp_sketchfab_api_key",
             "blendermcp_use_hyper3d",
             "blendermcp_hyper3d_mode",
-            "blendermcp_hyper3d_api_key",
             "blendermcp_use_hunyuan3d",
             "blendermcp_hunyuan3d_mode",
-            "blendermcp_hunyuan3d_secret_id",
-            "blendermcp_hunyuan3d_secret_key",
             "blendermcp_hunyuan3d_api_url",
             "blendermcp_hunyuan3d_octree_resolution",
             "blendermcp_hunyuan3d_num_inference_steps",

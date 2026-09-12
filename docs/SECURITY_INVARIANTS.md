@@ -14,7 +14,7 @@ means the invariant is required but not yet proven by the current implementation
 | PROTO-003 | A connection serializes each complete request/reply transaction unless multiplexing is explicitly negotiated. | Concurrent client tests. | Implemented; concurrency stress pending |
 | AUTH-001 | The server binds to loopback by default; remote exposure is not supported in protocol v2. | Configuration and socket binding tests. | Enforced; negative configuration tests and live loopback binding pass |
 | AUTH-002 | Every request authenticates before tool discovery, action parsing, or dispatch. | Missing, invalid, expired, replayed, and revoked proof tests. | Enforced; negative unit matrix and live wrong-credential test pass |
-| AUTH-003 | Credentials are high-entropy, rotatable, revocable, never logged, and stored with user-only access where supported. | Unit tests plus platform storage inspection. | Partial: rotation/revocation implemented; OS store pending |
+| AUTH-003 | Credentials are high-entropy, rotatable, revocable, never logged, and stored with user-only access where supported. | Unit tests plus platform storage inspection. | Partial: fixed-purpose OS store, fail-closed backend allowlist, shared bridge/add-on lookup, and rotation are implemented; packaged Blender and live ACL inspection pending |
 | AUTHZ-001 | Safe Mode permits only explicit reads; unknown/unclassified actions and structured mutations deny. | Policy and dispatcher matrix tests. | Partial: raw paths gated; action audit pending |
 | AUTHZ-002 | Raw Blender Python is documented and surfaced as arbitrary code execution, not a sandbox. | Schema/UI/docs assertions. | Implemented; live UI review pending |
 | THREAD-001 | Only Blender's main thread may call `bpy`; network and worker threads only enqueue work. | Thread assertions and live Blender tests. | Partial: shared lifecycle and pre-queue authorization are main-thread safe; execution-engine and remaining background paths need repository-wide audit |
@@ -41,8 +41,8 @@ means the invariant is required but not yet proven by the current implementation
   retains no Blender API reference; unaudited structured actions keep a conservative migration
   classification.
 - `blender_mcp/handlers/manage_scripting.py`: raw execution receives normal Python builtins.
-- Provider credentials remain ordinary Scene properties and temporary render copies still need
-  deterministic secret scrubbing and cleanup.
+- Provider credentials are no longer registered as Scene properties. Existing files are detected by
+  legacy field name and require explicit cleanup before save; temporary render cleanup remains.
 - Hunyuan external actions are quarantined at dispatcher and handler boundaries. Restoring them
   requires the 0E-0G controls and provider-job lifecycle in ADR 0005; other provider paths remain
   unaudited. Deploying the quarantine requires a Blender restart to invalidate callbacks captured

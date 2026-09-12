@@ -13,11 +13,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def PermissiveUnitSecurity() -> Iterator[None]:
+def PermissiveUnitSecurity(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Import after each test module has installed its Blender API doubles. Exercise
     # the production snapshot path instead of replacing its compatibility methods.
+    from blender_mcp.core import credential_store
     from blender_mcp.core.security import ConfigureSecurityPolicy, ResetSecurityPolicy
 
+    # Unit tests must never inspect or mutate the developer's real OS credential store.
+    monkeypatch.setattr(credential_store, "GetSystemCredential", lambda Name: None)
     ConfigureSecurityPolicy(SafeMode=False, RawCodeEnabled=True)
     yield
     ResetSecurityPolicy()
