@@ -272,8 +272,11 @@ class BlenderMCPServer:
 
             log_debug(f"[BlenderMCP:Server] Started on loopback port {self.port}")
             return True
-        except Exception:
-            log_debug("[BlenderMCP:Server] Start failed; inspect configuration")
+        except Exception as Error:
+            log_debug(
+                "[BlenderMCP:Server] Start failed; "
+                f"error_type={type(Error).__name__}"
+            )
             self.stop()
             return False
 

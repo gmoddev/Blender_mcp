@@ -763,9 +763,9 @@ def _manage_modeling_impl(action: Optional[str] = None, **params: Any) -> Dict[s
         mod.operation = mode
         mod.object = tool_obj
 
-        # Smart Solver Strategy
-        # FAST is better for performance, EXACT is better for complex geometry
-        mod.solver = "FAST"
+        # Blender 5.x removed the legacy FAST enum. EXACT is available across
+        # supported versions and is the safer default at this trust boundary.
+        mod.solver = "EXACT"
 
         # Auto-apply for destructive workflow if requested
         apply = params.get("apply", True)
